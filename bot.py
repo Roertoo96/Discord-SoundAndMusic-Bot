@@ -70,7 +70,7 @@ class SoundboardButton(Button):
             save_ranks(ranks)
 
             # Um die Labels der Buttons zu aktualisieren, muss die View aktualisiert werden
-            # await interaction.response.edit_message(view=self.view)
+            await interaction.response.edit_message(view=self.view)
             # await interaction.followup.send(f"Jetzt spielt: {label}. (Gespielt: {ranks[label]} mal)", ephemeral=True)
         else:
             await interaction.response.send_message("Ich bin in keinem Sprachkanal", ephemeral=True)
