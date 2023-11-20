@@ -18,6 +18,9 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+
+
+
 ydl_opts = {
     'format': 'bestaudio/best',
     'postprocessors': [{
@@ -44,7 +47,8 @@ async def on_ready():
     print(f'Bot is ready!')
     if not discord.opus.is_loaded():
         # Versuchen Sie, den korrekten Namen der Bibliothek anzugeben (abhängig von Ihrem System mag dies variieren.)
-        opus_lib = '/opt/homebrew/Cellar/opus/1.4/lib/libopus.dylib'
+        #opus_lib = '/opt/homebrew/Cellar/opus/1.4/lib/libopus.dylib' # mac
+        opus_lib = '/usr/lib/x86_64-linux-gnu/libopus.so.0' # debian
         discord.opus.load_opus(opus_lib)
 
 @bot.command(name='join', help='Tells the bot to join the voice channel')
