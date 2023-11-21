@@ -9,7 +9,8 @@ import collections
 
 
 
-token = os.environ.get('discordbot')
+#token = os.environ.get('discordbot')
+token = "MTE3NjE3Mjk5MTk5OTEyMzUwNg.GdhjJT.DHXB7K8EaPHWA2eZh0lpBU5VgorazV78vyGrxc"
 
 # Pfad zur Opus-Bibliothek auf einem Mac mit Homebrew
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
@@ -35,21 +36,36 @@ bot = commands.Bot(command_prefix='!', help_command=None, intents=intents)
 
 
 
-# Funktion zum Laden der Soundränge aus einer JSON-Datei
+# Laden von Soundrängen und Benutzerrängen aus einer JSON-Datei
 def load_ranks():
     if os.path.exists('ranks.json'):
         with open('ranks.json', 'r') as f:
-            return json.load(f)
-    return {}
+            data = json.load(f)
+            return data.get('sound_ranks', {}), collections.defaultdict(int, data.get('user_ranks', {}))
+    return {}, collections.defaultdict(int)
 
-# Funktion zum Speichern der Soundränge in einer JSON-Datei
-def save_ranks(ranks):
+# Speichern von Soundrängen und Benutzerrängen in einer JSON-Datei
+def save_ranks(sound_ranks, user_rankings):
+    # Konsolidieren von Benutzerranken
+    consolidated_user_rankings = {}
+    for user_id, points in user_rankings.items():
+        # user_id als string, um mit JSON-Schlüsseln kompatibel zu sein
+        user_id_str = str(user_id)
+        if user_id_str in consolidated_user_rankings:
+            consolidated_user_rankings[user_id_str] += points
+        else:
+            consolidated_user_rankings[user_id_str] = points
+            
+    # Speichern der Daten mit konsolidierten Benutzerrankings
+    data = {
+        'sound_ranks': sound_ranks,
+        'user_ranks': consolidated_user_rankings  # Verwenden der konsolidierten Daten
+    }
     with open('ranks.json', 'w') as f:
-        json.dump(ranks, f, indent=4)
+        json.dump(data, f, indent=4)
 
-ranks = load_ranks()  # Lade die aktuellen Ränge beim Start des Bots
-
-
+# Initiallade die Ränge beim Starten des Bots
+ranks, user_ranks = load_ranks()
 
 
 class SoundboardButton(Button):
@@ -68,18 +84,21 @@ class SoundboardButton(Button):
             # Update rank
             label = os.path.splitext(self.sound_file)[0]
             ranks[label] = ranks.get(label, 0) + 1
-            save_ranks(ranks)
+
+            # Rufe save_ranks mit beiden Dictionaries auf
+            save_ranks(ranks, user_ranks) # Korrigierter Funktionsaufruf
 
             # Um die Labels der Buttons zu aktualisieren, muss die View aktualisiert werden
             await interaction.response.edit_message(view=self.view)
-            # await interaction.followup.send(f"Jetzt spielt: {label}. (Gespielt: {ranks[label]} mal)", ephemeral=True)
         else:
             await interaction.response.send_message("Ich bin in keinem Sprachkanal", ephemeral=True)
 
         # Benutzerranking aktualisieren
         user_id = interaction.user.id
         user_ranks[user_id] += 1
-        save_ranks(ranks) # Sie sollten auch die user_ranks speichern, aber das erfordert eine Änderung der save_ranks() und load_ranks() Funktionen.
+        
+        # Rufe save_ranks mit beiden Dictionaries auf
+        save_ranks(ranks, user_ranks) # Korrigierter Funktionsaufruf
 
 
 class SoundboardView(View):
@@ -200,10 +219,6 @@ async def send_rankings(ctx: commands.Context):
     rankings_description = "\n".join([f"<@{user_id}>: {points} Klick(s)" for user_id, points in sorted_user_ranks])
     embed = discord.Embed(title="User Rankings", description=rankings_description, color=0x00ff00)
     await ctx.send(embed=embed)
-
-def save_ranks(ranks):
-    with open('ranks.json', 'w') as f:
-        json.dump({'sound_ranks': ranks, 'user_ranks': dict(user_ranks)}, f, indent=4)
 
 def load_ranks():
     if os.path.exists('ranks.json'):
