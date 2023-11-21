@@ -9,8 +9,7 @@ import collections
 
 
 
-#token = os.environ.get('discordbot')
-token = "MTE3NjE3Mjk5MTk5OTEyMzUwNg.GdhjJT.DHXB7K8EaPHWA2eZh0lpBU5VgorazV78vyGrxc"
+token = os.environ.get('discordbot')
 
 # Pfad zur Opus-Bibliothek auf einem Mac mit Homebrew
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
