@@ -5,13 +5,16 @@ from discord.ui import Button, View
 import os
 import json
 import aiohttp  # um die Dateien herunterzuladen
+import collections
+
 
 
 token = os.environ.get('discordbot')
 
-
 # Pfad zur Opus-Bibliothek auf einem Mac mit Homebrew
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
+user_ranks = collections.defaultdict(int)
+
 
 if os.path.exists(opus_lib_path) and not discord.opus.is_loaded():
     discord.opus.load_opus(opus_lib_path)
@@ -28,8 +31,6 @@ intents.voice_states = True
 
 #bot = commands.Bot(command_prefix='!', intents=intents)
 bot = commands.Bot(command_prefix='!', help_command=None, intents=intents)
-
-
 
 
 
@@ -75,6 +76,12 @@ class SoundboardButton(Button):
         else:
             await interaction.response.send_message("Ich bin in keinem Sprachkanal", ephemeral=True)
 
+        # Benutzerranking aktualisieren
+        user_id = interaction.user.id
+        user_ranks[user_id] += 1
+        save_ranks(ranks) # Sie sollten auch die user_ranks speichern, aber das erfordert eine Änderung der save_ranks() und load_ranks() Funktionen.
+
+
 class SoundboardView(View):
     def __init__(self, sound_files_with_ranks):
         super().__init__(timeout=None)
@@ -83,28 +90,6 @@ class SoundboardView(View):
             self.add_item(SoundboardButton(sound_file, *rank_and_points))
 
             
-
-
-
-
-                # Eigene Help-Klasse, die von DefaultHelpCommand erbt
-# class CustomHelpCommand(DefaultHelpCommand):
-#     def __init__(self):
-#         super().__init__()
-    
-#     async def send_bot_help(self, mapping):
-#         # Passen Sie das Design der Hilfeausgabe an Ihre Vorlieben an
-#         embed = discord.Embed(title="Bot Befehle", description="Liste aller Befehle", color=discord.Color.blue())
-#         for cog, commands in mapping.items():
-#             filtered = await self.filter_commands(commands, sort=True)
-#             command_signatures = [self.get_command_signature(c) for c in filtered]
-#             if command_signatures:
-#                 cog_name = getattr(cog, "qualified_name", "No Category")
-#                 embed.add_field(name=cog_name, value="\n".join(command_signatures), inline=False)
-        
-#         channel = self.get_destination()
-#         await channel.send(embed=embed)
-
 
 @bot.event
 async def on_ready():
@@ -202,8 +187,32 @@ async def help_command(ctx):
     
     await ctx.send(embed=embed)
 
+# Neue Funktion send_rankings hinzufügen
+@bot.command(name='rankings')
+async def send_rankings(ctx: commands.Context):
+    # Erstellen Sie eine sortierte Liste der Benutzerrankings
+    sorted_user_ranks = sorted(user_ranks.items(), key=lambda item: item[1], reverse=True)
+    if not sorted_user_ranks:
+        await ctx.send("Noch keine Rankings vorhanden.")
+        return
+    
+    # Erstellen Sie eine Nachricht mit den Top-Rankings
+    rankings_description = "\n".join([f"<@{user_id}>: {points} Klick(s)" for user_id, points in sorted_user_ranks])
+    embed = discord.Embed(title="User Rankings", description=rankings_description, color=0x00ff00)
+    await ctx.send(embed=embed)
 
+def save_ranks(ranks):
+    with open('ranks.json', 'w') as f:
+        json.dump({'sound_ranks': ranks, 'user_ranks': dict(user_ranks)}, f, indent=4)
 
+def load_ranks():
+    if os.path.exists('ranks.json'):
+        with open('ranks.json', 'r') as f:
+            data = json.load(f)
+            return data.get('sound_ranks', {}), collections.defaultdict(int, data.get('user_ranks', {}))
+    return {}, collections.defaultdict(int)
+
+ranks, user_ranks = load_ranks()
 
 bot.run(token)
 
