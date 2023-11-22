@@ -6,6 +6,9 @@ import os
 import json
 import aiohttp  # um die Dateien herunterzuladen
 import collections
+import math
+
+MAX_BUTTONS_PER_MESSAGE = 20  # Discord erlaubt aktuell maximal 25 Buttons pro Nachricht
 
 
 
@@ -99,15 +102,12 @@ class SoundboardButton(Button):
         # Rufe save_ranks mit beiden Dictionaries auf
         save_ranks(ranks, user_ranks) # Korrigierter Funktionsaufruf
 
-
 class SoundboardView(View):
     def __init__(self, sound_files_with_ranks):
         super().__init__(timeout=None)
-        # Für jede Sounddatei wird ein Button mit dem entsprechenden Rang und den Punkten erstellt
+        
         for sound_file, rank_and_points in sound_files_with_ranks:
             self.add_item(SoundboardButton(sound_file, *rank_and_points))
-
-            
 
 @bot.event
 async def on_ready():
@@ -138,9 +138,14 @@ async def soundboard(ctx: commands.Context):
         if sound_file.endswith(('.mp3', '.wav'))
     ]
     
-    # Erstelle eine Ansicht des Soundboards mit dem aktuellen Ranking
-    view = SoundboardView(sound_files_with_ranks)
-    await ctx.send("Wähle einen Sound aus der Liste:", view=view)
+    # Erstelle eine Liste von SoundboardViews, jede mit bis zu MAX_BUTTONS_PER_MESSAGE Buttons
+    sound_files_chunks = [sound_files_with_ranks[i:i + MAX_BUTTONS_PER_MESSAGE] for i in range(0, len(sound_files_with_ranks), MAX_BUTTONS_PER_MESSAGE)]
+    views = [SoundboardView(chunk) for chunk in sound_files_chunks]
+
+    # Sende die Views in separaten Nachrichten
+    for view in views:
+        await ctx.send("Wähle einen Sound aus der Liste:", view=view)
+
 
 
 
