@@ -1,0 +1,13 @@
+[0;1;32m●[0m discordbot.service - Discord Bot Service
+     Loaded: loaded (/etc/systemd/system/discordbot.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Fri 2023-11-17 15:31:10 UTC; 7s ago
+   Main PID: 827 (python3)
+      Tasks: 3 (limit: 1029)
+     Memory: 24.1M
+        CPU: 167ms
+     CGroup: /system.slice/discordbot.service
+             └─827 /usr/bin/python3 /srv/PROST/bot.py
+
+Nov 17 15:31:10 debian systemd[1]: Started Discord Bot Service.
+Nov 17 15:31:10 debian python3[827]: [2023-11-17 15:31:10] [INFO    ] discord.client: logging in using static token
+Nov 17 15:31:11 debian python3[827]: [2023-11-17 15:31:11] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: eb49897ac884970ddf8e862e871ffdc2).
