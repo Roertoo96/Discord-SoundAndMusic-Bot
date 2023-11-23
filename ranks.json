@@ -12,7 +12,7 @@
         "aoooouuhhh": 19,
         "Wei_ich_nicht": 16,
         "Atepoker": 15,
-        "Knock_Knock": 17,
+        "Knock_Knock": 18,
         "Wallah_Krise": 16,
         "GTA_mission": 9,
         "Wer_ist_da": 17,
@@ -60,6 +60,15 @@
         "546699210737844229": 4
     },
     "sound_emojis": {
-        "Knock_Knock": "\ud83d\udeaa"
+        "Knock_Knock": "\ud83d\udeaa",
+        "Run": "\ud83c\udfc3\u200d\u2642\ufe0f",
+        "More_Footwork": "\ud83e\uddb6",
+        "Atepoker": "\ud83d\udc8a",
+        "God_is_able_to_enable": "\ud83e\uddd9\u200d\u2642\ufe0f",
+        "More_Energy": "\ud83d\udd0b",
+        "Frauen": "\ud83d\udc83",
+        "Nein_nein_nein": "\ud83d\udeab",
+        "Zeizazei": "<:oggy:1177365158885077052>",
+        "Pineapple": "<:pineappple:1177364970103652362>"
     }
 }
