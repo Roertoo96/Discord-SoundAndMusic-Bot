@@ -148,7 +148,7 @@ async def soundboard(ctx: commands.Context):
 
     # Sende die Views in separaten Nachrichten
     for view in views:
-        await ctx.send("Wähle einen Sound aus der Liste:", view=view)
+        await ctx.send("", view=view)
 
 
 @bot.command(name='setemoji')
