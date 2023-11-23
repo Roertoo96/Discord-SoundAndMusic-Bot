@@ -12,7 +12,7 @@
         "aoooouuhhh": 19,
         "Wei_ich_nicht": 16,
         "Atepoker": 15,
-        "Knock_Knock": 15,
+        "Knock_Knock": 17,
         "Wallah_Krise": 16,
         "GTA_mission": 9,
         "Wer_ist_da": 17,
@@ -53,10 +53,13 @@
         "Coca_Cola_Song": 3
     },
     "user_ranks": {
-        "222844396553371648": 43,
+        "222844396553371648": 1,
         "240557171404701698": 267,
         "513384522474192916": 34,
         "766728388382556160": 77,
         "546699210737844229": 4
+    },
+    "sound_emojis": {
+        "Knock_Knock": "\ud83d\udeaa"
     }
 }

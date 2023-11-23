@@ -43,40 +43,48 @@ def load_ranks():
     if os.path.exists('ranks.json'):
         with open('ranks.json', 'r') as f:
             data = json.load(f)
-            return data.get('sound_ranks', {}), collections.defaultdict(int, data.get('user_ranks', {}))
-    return {}, collections.defaultdict(int)
+            sound_ranks = data.get('sound_ranks', {})
+            user_ranks = collections.defaultdict(int, data.get('user_ranks', {}))
+            sound_emojis = data.get('sound_emojis', {})
+            return sound_ranks, user_ranks, sound_emojis
+    else:
+        return {}, collections.defaultdict(int), {}
 
 # Speichern von Soundrängen und Benutzerrängen in einer JSON-Datei
-def save_ranks(sound_ranks, user_rankings):
+def save_ranks(sound_ranks, user_rankings, sound_emojis):
     # Konsolidieren von Benutzerranken
     consolidated_user_rankings = {}
     for user_id, points in user_rankings.items():
         # user_id als string, um mit JSON-Schlüsseln kompatibel zu sein
         user_id_str = str(user_id)
-        if user_id_str in consolidated_user_rankings:
-            consolidated_user_rankings[user_id_str] += points
-        else:
-            consolidated_user_rankings[user_id_str] = points
+        consolidated_user_rankings[user_id_str] = points
             
-    # Speichern der Daten mit konsolidierten Benutzerrankings
+    # Speichern der Daten mit konsolidierten Benutzerrankings und Sound Emojis
     data = {
         'sound_ranks': sound_ranks,
-        'user_ranks': consolidated_user_rankings  # Verwenden der konsolidierten Daten
+        'user_ranks': consolidated_user_rankings,
+        'sound_emojis': sound_emojis  # Speichere die Sound Emojis
     }
     with open('ranks.json', 'w') as f:
         json.dump(data, f, indent=4)
 
+
 # Initiallade die Ränge beim Starten des Bots
-ranks, user_ranks = load_ranks()
+ranks, user_ranks, sound_emojis = load_ranks()
 
 
 class SoundboardButton(Button):
     def __init__(self, sound_file, rank, points):
+        emoji = sound_emojis.get(os.path.splitext(sound_file)[0])
+
         # Das Label des Buttons enthält den Rang, den Namen und die Punktzahl
-        super().__init__(label=f"{rank}. {os.path.splitext(sound_file)[0]} ({points})")
+        super().__init__(label=f"{rank}. {os.path.splitext(sound_file)[0]} ({points})", emoji=emoji)
         self.sound_file = sound_file
 
     async def callback(self, interaction: discord.Interaction):
+        # Zuerst bestätige die Interaktion sofort
+        await interaction.response.defer()
+        
         vc = interaction.guild.voice_client
         if vc and vc.is_connected():
             vc.stop()
@@ -86,21 +94,17 @@ class SoundboardButton(Button):
             # Update rank
             label = os.path.splitext(self.sound_file)[0]
             ranks[label] = ranks.get(label, 0) + 1
+            user_ranks[interaction.user.id] += 1
 
-            # Rufe save_ranks mit beiden Dictionaries auf
-            save_ranks(ranks, user_ranks) # Korrigierter Funktionsaufruf
+            # Rufe save_ranks mit allen Dictionaries auf
+            save_ranks(ranks, user_ranks, sound_emojis)
 
-            # Um die Labels der Buttons zu aktualisieren, muss die View aktualisiert werden
-            await interaction.response.edit_message(view=self.view)
+            # Du brauchst nicht zu warten, bis der Sound zu Ende ist
+            # Die Interaktion wird bereits durch "defer()" bestätigt
         else:
-            await interaction.response.send_message("Ich bin in keinem Sprachkanal", ephemeral=True)
+            # Sende eine Nachricht, wenn der Bot nicht im Voice-Channel ist
+            await interaction.followup.send("Ich bin in keinem Sprachkanal.", ephemeral=True)
 
-        # Benutzerranking aktualisieren
-        user_id = interaction.user.id
-        user_ranks[user_id] += 1
-        
-        # Rufe save_ranks mit beiden Dictionaries auf
-        save_ranks(ranks, user_ranks) # Korrigierter Funktionsaufruf
 
 class SoundboardView(View):
     def __init__(self, sound_files_with_ranks):
@@ -147,6 +151,18 @@ async def soundboard(ctx: commands.Context):
         await ctx.send("Wähle einen Sound aus der Liste:", view=view)
 
 
+@bot.command(name='setemoji')
+async def setemoji(ctx, sound_name: str, emoji: str):
+    # Prüfen, ob der Sound existiert
+    sound_file = f'{sound_name}.mp3'  # oder '.wav', je nach Dateityp
+    if not os.path.exists(f'./media/{sound_file}'):
+        await ctx.send('Sound nicht gefunden.')
+        return
+
+    # Emoji in den Rängen speichern
+    sound_emojis[sound_name] = emoji
+    save_ranks(ranks, user_ranks, sound_emojis)  # Erweitert die Funktion save_ranks
+    await ctx.send(f'Emoji für {sound_name} gesetzt zu {emoji}')
 
 
 @bot.command(name='upload', help='Lade eine MP3-Datei hoch. !upload')
