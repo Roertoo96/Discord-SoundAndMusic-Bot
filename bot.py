@@ -1,12 +1,14 @@
 import discord
 from discord.ext import commands
 from discord.ext.commands import DefaultHelpCommand
-from discord.ui import Button, View
+from discord.ui import Button, View, Modal, InputText
 import os
 import json
 import aiohttp  # um die Dateien herunterzuladen
 import collections
 import math
+
+
 
 MAX_BUTTONS_PER_MESSAGE = 20  # Discord erlaubt aktuell maximal 25 Buttons pro Nachricht
 
@@ -73,6 +75,65 @@ def save_ranks(sound_ranks, user_rankings, sound_emojis):
 ranks, user_ranks, sound_emojis = load_ranks()
 
 
+
+class SearchButton(Button):
+    def __init__(self):
+        super().__init__(label="Suche nach Sounds", style=discord.ButtonStyle.primary)
+    
+    async def callback(self, interaction: discord.Interaction):
+        # Zeige das Modal an, wenn der Button gedrückt wird
+        modal = SearchModal()
+        await interaction.response.send_modal(modal)
+
+class SearchModal(Modal):
+    def __init__(self):
+        super().__init__(title="Sound-Suche")
+
+        self.add_item(InputText(
+            label="Wonach möchtest du suchen?",
+            placeholder="Gebe einen Suchbegriff ein...",
+            custom_id="search_query",
+            style=discord.InputTextStyle.short,
+            min_length=1
+        ))
+
+    async def callback(self, interaction: discord.Interaction):
+        # Hole die Suchanfrage aus dem Modal
+        search_query = self.children[0].value
+
+        # Führe die Suche durch und filtere die Sounddateien
+        search_results = [
+            (sound_file, (rank, ranks.get(os.path.splitext(sound_file)[0], 0)))
+            for rank, sound_file in enumerate(sorted(
+                os.listdir('./media'), key=lambda sf: ranks.get(os.path.splitext(sf)[0], 0), reverse=True), start=1)
+            if search_query.lower() in os.path.splitext(sound_file)[0].lower() and sound_file.endswith(('.mp3', '.wav'))
+        ]
+
+        # Erstelle eine Ansicht mit den Ergebnissen der Suche
+        if search_results:
+            view = SoundboardView(search_results)
+            await interaction.response.edit_message(view=view)
+        else:
+            await interaction.response.send_message("Es wurden keine passenden Sounds gefunden.")
+
+
+
+
+
+class RefreshButton(Button):
+    def __init__(self, label: str, style: discord.ButtonStyle, custom_id: str):
+        super().__init__(label=label, style=style, custom_id=custom_id)
+
+    async def callback(self, interaction: discord.Interaction):
+        # Erstelle eine neue View mit dem ursprünglichen Suchbutton
+        view = SoundboardView([])
+        search_button = SearchButton()
+        view.add_item(search_button)
+        
+        # Aktualisiere die Nachricht, um den neuen View anzuzeigen
+        await interaction.response.edit_message(view=view)
+
+
 class SoundboardButton(Button):
     def __init__(self, sound_file, rank, points):
         emoji = sound_emojis.get(os.path.splitext(sound_file)[0])
@@ -113,6 +174,9 @@ class SoundboardView(View):
         for sound_file, rank_and_points in sound_files_with_ranks:
             self.add_item(SoundboardButton(sound_file, *rank_and_points))
 
+        if sound_files_with_ranks:  # Wenn es Sound-Dateien gibt, dann haben wir Suchergebnisse
+            refresh_button = RefreshButton(label="Zurücksetzen", style=discord.ButtonStyle.grey, custom_id="refresh_button")
+            self.add_item(refresh_button)
 @bot.event
 async def on_ready():
     print(f'Angemeldet als {bot.user.name}')
@@ -121,6 +185,13 @@ async def on_ready():
 @bot.command(name='soundboard')
 async def soundboard(ctx: commands.Context):
     # Überprüfen, ob der Befehl von jemandem in einem Sprachkanal gesendet wurde
+        # Ihr bisheriger Code für das Soundboard ...
+    # Sende den Suchbutton am Ende des Befehls
+    search_button = SearchButton()
+    view = SoundboardView(sound_files_with_ranks=[])  # initial leer, bis Suche abgeschlossen ist
+    view.add_item(search_button)  # Füge den Suchbutton zur Ansicht hinzu
+    await ctx.send("Klicke auf den Button um nach Sounds zu suchen, oder benutze das Soundboard:", view=view)
+
     if ctx.author.voice is None:
         await ctx.send("Du musst in einem Sprachkanal sein, um das Soundboard zu verwenden.")
         return
