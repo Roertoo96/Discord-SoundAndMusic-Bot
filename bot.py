@@ -1,4 +1,5 @@
 import discord
+import platform
 from discord.ext import commands
 from discord.ext.commands import DefaultHelpCommand
 from discord.ui import Button, View, Modal, InputText
@@ -8,25 +9,44 @@ import aiohttp  # um die Dateien herunterzuladen
 import collections
 import math
 
+def perform_os_specific_action():
+    current_os = platform.system()
 
+    if current_os == "Windows":
+        media = r"C:/Users/Andre/OneDrive/Github/PROST/media/"
+        token = os.getenv('discordbot')
+        return media, token
+        # Hier den Code für Windows hinzufügen
+
+    elif current_os == "Darwin":  # "Darwin" ist der Systemname für macOS
+        media = ".\media"
+        token = os.environ.get('discordbot')
+        return media, token
+        # Hier den Code für macOS hinzufügen
+
+    else:
+        media = ".\media"
+        token = os.environ.get('discordbot')
+        return media, token
+
+# Media Variable setzen
+media,token = perform_os_specific_action()
 
 MAX_BUTTONS_PER_MESSAGE = 20  # Discord erlaubt aktuell maximal 25 Buttons pro Nachricht
 
 
-
-token = os.environ.get('discordbot')
+token = os.getenv('discordbot')
 
 # Pfad zur Opus-Bibliothek auf einem Mac mit Homebrew
-opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
+# opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 user_ranks = collections.defaultdict(int)
 
 
-if os.path.exists(opus_lib_path) and not discord.opus.is_loaded():
-    discord.opus.load_opus(opus_lib_path)
-    print('Opus-Bibliothek erfolgreich geladen.')
-else:
-    print(f'Kann die Opus-Bibliothek nicht unter {opus_lib_path} finden oder sie ist bereits geladen.')
-
+#if os.path.exists(opus_lib_path) and not discord.opus.is_loaded():
+#    discord.opus.load_opus(opus_lib_path)
+#    print('Opus-Bibliothek erfolgreich geladen.')
+#else:
+#    print(f'Kann die Opus-Bibliothek nicht unter {opus_lib_path} finden oder sie ist bereits geladen.')
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -36,9 +56,6 @@ intents.voice_states = True
 
 #bot = commands.Bot(command_prefix='!', intents=intents)
 bot = commands.Bot(command_prefix='!', help_command=None, intents=intents)
-
-
-
 
 # Laden von Soundrängen und Benutzerrängen aus einer JSON-Datei
 def load_ranks():
@@ -149,7 +166,8 @@ class SoundboardButton(Button):
         vc = interaction.guild.voice_client
         if vc and vc.is_connected():
             vc.stop()
-            audio_source = discord.FFmpegPCMAudio(f'./media/{self.sound_file}')
+            audio_source = discord.FFmpegPCMAudio(f'{media}{self.sound_file}')
+            #audio_source = discord.FFmpegPCMAudio(f'{self.sound_file}')
             vc.play(audio_source)
 
             # Update rank
@@ -165,7 +183,6 @@ class SoundboardButton(Button):
         else:
             # Sende eine Nachricht, wenn der Bot nicht im Voice-Channel ist
             await interaction.followup.send("Ich bin in keinem Sprachkanal.", ephemeral=True)
-
 
 class SoundboardView(View):
     def __init__(self, sound_files_with_ranks):
