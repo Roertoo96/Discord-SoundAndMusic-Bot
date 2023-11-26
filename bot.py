@@ -38,15 +38,15 @@ MAX_BUTTONS_PER_MESSAGE = 20  # Discord erlaubt aktuell maximal 25 Buttons pro N
 token = os.getenv('discordbot')
 
 # Pfad zur Opus-Bibliothek auf einem Mac mit Homebrew
-# opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
+opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 user_ranks = collections.defaultdict(int)
 
 
-#if os.path.exists(opus_lib_path) and not discord.opus.is_loaded():
-#    discord.opus.load_opus(opus_lib_path)
-#    print('Opus-Bibliothek erfolgreich geladen.')
-#else:
-#    print(f'Kann die Opus-Bibliothek nicht unter {opus_lib_path} finden oder sie ist bereits geladen.')
+if os.path.exists(opus_lib_path) and not discord.opus.is_loaded():
+    discord.opus.load_opus(opus_lib_path)
+    print('Opus-Bibliothek erfolgreich geladen.')
+else:
+    print(f'Kann die Opus-Bibliothek nicht unter {opus_lib_path} finden oder sie ist bereits geladen.')
 
 intents = discord.Intents.default()
 intents.messages = True
