@@ -19,13 +19,13 @@ def perform_os_specific_action():
         # Hier den Code für Windows hinzufügen
 
     elif current_os == "Darwin":  # "Darwin" ist der Systemname für macOS
-        media = ".\media"
+        media = r'.\media\\'
         token = os.environ.get('discordbot')
         return media, token
         # Hier den Code für macOS hinzufügen
 
     else:
-        media = ".\media"
+        media = r'.\media\\'
         token = os.environ.get('discordbot')
         return media, token
 
