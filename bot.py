@@ -8,90 +8,54 @@ import json
 import aiohttp  # um die Dateien herunterzuladen
 import collections
 import math
+from checkos import perform_os_specific_action
+from ranking import load_ranks,save_ranks
 
-def perform_os_specific_action():
-    current_os = platform.system()
 
-    if current_os == "Windows":
-        media = r"C:/Users/Andre/OneDrive/Github/PROST/media/"
-        token = os.getenv('discordbot')
-        return media, token
-        # Hier den Code für Windows hinzufügen
+####  Discord Intents  #####
 
-    elif current_os == "Darwin":  # "Darwin" ist der Systemname für macOS
-        media = './media/'
-        token = os.environ.get('discordbot')
-        return media, token
-        # Hier den Code für macOS hinzufügen
+intents = discord.Intents.default()  # Setzt die Standardintents
+intents.messages = True              # Erlaubt dem Bot, Nachrichten zu erhalten
+intents.message_content = True       # Erlaubt dem Bot, auf den Inhalt von Nachrichten zuzugreifen
+intents.guilds = True                # Erlaubt dem Bot, sich über Serverevents zu informieren
+intents.voice_states = True          # Erlaubt dem Bot, sich über Sprachstatusänderungen zu informieren
 
-    else:
-        media = './media/'
-        token = os.environ.get('discordbot')
-        return media, token
 
-# Media Variable setzen
+
+#####    Variablen     #####
+
 media,token = perform_os_specific_action()
-
 MAX_BUTTONS_PER_MESSAGE = 20  # Discord erlaubt aktuell maximal 25 Buttons pro Nachricht
-
-
 token = os.getenv('discordbot')
-
-# Pfad zur Opus-Bibliothek auf einem Mac mit Homebrew
-#opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 user_ranks = collections.defaultdict(int)
+opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 
 
-#if os.path.exists(opus_lib_path) and not discord.opus.is_loaded():
-#    discord.opus.load_opus(opus_lib_path)
-#    print('Opus-Bibliothek erfolgreich geladen.')
-#else:
-#    print(f'Kann die Opus-Bibliothek nicht unter {opus_lib_path} finden oder sie ist bereits geladen.')
 
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-intents.guilds = True
-intents.voice_states = True
+####   opus wird nur für den  Mac benötigt   #####
 
-#bot = commands.Bot(command_prefix='!', intents=intents)
+if os.path.exists(opus_lib_path) and not discord.opus.is_loaded():
+   discord.opus.load_opus(opus_lib_path)
+   print('Opus-Bibliothek erfolgreich geladen.')
+else:
+   print(f'Kann die Opus-Bibliothek nicht unter {opus_lib_path} finden oder sie ist bereits geladen.')
+
+
+
+#######    Bot start / commands laden   ########
 bot = commands.Bot(command_prefix='!', help_command=None, intents=intents)
 
-# Laden von Soundrängen und Benutzerrängen aus einer JSON-Datei
-def load_ranks():
-    if os.path.exists('ranks.json'):
-        with open('ranks.json', 'r') as f:
-            data = json.load(f)
-            sound_ranks = data.get('sound_ranks', {})
-            user_ranks = collections.defaultdict(int, data.get('user_ranks', {}))
-            sound_emojis = data.get('sound_emojis', {})
-            return sound_ranks, user_ranks, sound_emojis
-    else:
-        return {}, collections.defaultdict(int), {}
-
-# Speichern von Soundrängen und Benutzerrängen in einer JSON-Datei
-def save_ranks(sound_ranks, user_rankings, sound_emojis):
-    # Konsolidieren von Benutzerranken
-    consolidated_user_rankings = {}
-    for user_id, points in user_rankings.items():
-        # user_id als string, um mit JSON-Schlüsseln kompatibel zu sein
-        user_id_str = str(user_id)
-        consolidated_user_rankings[user_id_str] = points
-            
-    # Speichern der Daten mit konsolidierten Benutzerrankings und Sound Emojis
-    data = {
-        'sound_ranks': sound_ranks,
-        'user_ranks': consolidated_user_rankings,
-        'sound_emojis': sound_emojis  # Speichere die Sound Emojis
-    }
-    with open('ranks.json', 'w') as f:
-        json.dump(data, f, indent=4)
 
 
-# Initiallade die Ränge beim Starten des Bots
+####### Initiallade die Ränge beim Starten des Bots  ######
 ranks, user_ranks, sound_emojis = load_ranks()
 
 
+
+
+
+
+##### Klassen und Discord funktionen #####
 
 class SearchButton(Button):
     def __init__(self):
@@ -101,6 +65,8 @@ class SearchButton(Button):
         # Zeige das Modal an, wenn der Button gedrückt wird
         modal = SearchModal()
         await interaction.response.send_modal(modal)
+
+
 
 class SearchModal(Modal):
     def __init__(self):
@@ -197,6 +163,14 @@ class SoundboardView(View):
 @bot.event
 async def on_ready():
     print(f'Angemeldet als {bot.user.name}')
+
+
+
+
+
+#####  Discord commands  #####
+
+
 
 
 @bot.command(name='soundboard')
@@ -328,14 +302,6 @@ async def send_rankings(ctx: commands.Context):
     embed = discord.Embed(title="User Rankings", description=rankings_description, color=0x00ff00)
     await ctx.send(embed=embed)
 
-def load_ranks():
-    if os.path.exists('ranks.json'):
-        with open('ranks.json', 'r') as f:
-            data = json.load(f)
-            return data.get('sound_ranks', {}), collections.defaultdict(int, data.get('user_ranks', {}))
-    return {}, collections.defaultdict(int)
-
-ranks, user_ranks = load_ranks()
 
 bot.run(token)
 
