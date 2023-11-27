@@ -29,6 +29,7 @@ MAX_BUTTONS_PER_MESSAGE = 20  # Discord erlaubt aktuell maximal 25 Buttons pro N
 token = os.getenv('discordbot')
 user_ranks = collections.defaultdict(int)
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
+LEVEL_UP_EXP = 100  # Angenommen, jeder Levelaufstieg erfordert 100 EXP.
 
 
 
@@ -68,6 +69,7 @@ class SearchButton(Button):
 
 
 
+## Modal ist das in Discortd ein Dialogfenster ##
 class SearchModal(Modal):
     def __init__(self):
         super().__init__(title="Sound-Suche")
@@ -94,7 +96,7 @@ class SearchModal(Modal):
 
         # Erstelle eine Ansicht mit den Ergebnissen der Suche
         if search_results:
-            view = SoundboardView(search_results)
+            view = SoundboardView(search_results, user_ranks, sound_emojis)
             await interaction.response.edit_message(view=view)
         else:
             await interaction.response.send_message("Es wurden keine passenden Sounds gefunden.")
@@ -118,12 +120,15 @@ class RefreshButton(Button):
 
 
 class SoundboardButton(Button):
-    def __init__(self, sound_file, rank, points):
+    def __init__(self, sound_file, rank, points, user_ranks, sound_emojis):
         emoji = sound_emojis.get(os.path.splitext(sound_file)[0])
-
+        
         # Das Label des Buttons enthält den Rang, den Namen und die Punktzahl
         super().__init__(label=f"{rank}. {os.path.splitext(sound_file)[0]} ({points})", emoji=emoji)
+        
         self.sound_file = sound_file
+        self.user_ranks = user_ranks
+        self.sound_emojis = sound_emojis
 
     async def callback(self, interaction: discord.Interaction):
         # Zuerst bestätige die Interaktion sofort
@@ -131,31 +136,47 @@ class SoundboardButton(Button):
         
         vc = interaction.guild.voice_client
         if vc and vc.is_connected():
-            vc.stop()
+            vc.stop()  # Stoppen Sie die aktuelle Tonwiedergabe falls vorhanden
             audio_source = discord.FFmpegPCMAudio(f'{media}{self.sound_file}')
-            #audio_source = discord.FFmpegPCMAudio(f'{self.sound_file}')
-            vc.play(audio_source)
+            vc.play(audio_source)  # Spielen Sie den neuen Ton ab
 
-            # Update rank
+            user_id = str(interaction.user.id)
+            # Stellen Sie sicher, dass der Benutzer im user_ranks-Verzeichnis ist, initialisieren Sie ihn andernfalls
+            if user_id not in self.user_ranks:
+                self.user_ranks[user_id] = {"exp": 0, "level": 1}
+            
+            user_data = self.user_ranks[user_id]
+
+            # Fügen Sie einige EXP hinzu für das Abspielen des Sounds
+            user_data['exp'] += 10  # Hier geben Sie jedem Nutzer 10 EXP für das Abspielen eines Sounds 
+
+            # Prüfen Sie ob ein Levelaufstieg vorgenommen werden sollte
+            if user_data['exp'] >= LEVEL_UP_EXP:
+                user_data['level'] += 1  # Erhöhen des Nutzerlevels
+                user_data['exp'] = user_data['exp'] - LEVEL_UP_EXP  # Abziehen der EXP für den Levelaufstieg
+
+            # Aktualisieren Sie die Hauptdatenstruktur user_ranks
+            self.user_ranks[user_id] = user_data
+            
+            # Erhöhen Sie die Anzahl der Abspielungen des Sounds
             label = os.path.splitext(self.sound_file)[0]
             ranks[label] = ranks.get(label, 0) + 1
-            user_ranks[interaction.user.id] += 1
+            
+            # Speichern Sie die aktualisierten Ränge und Nutzerinformationen
+            save_ranks(ranks, self.user_ranks, self.sound_emojis)
 
-            # Rufe save_ranks mit allen Dictionaries auf
-            save_ranks(ranks, user_ranks, sound_emojis)
-
-            # Du brauchst nicht zu warten, bis der Sound zu Ende ist
-            # Die Interaktion wird bereits durch "defer()" bestätigt
+            # Hinweis: Sie müssen nicht auf das Ende der Tonwiedergabe warten
+            # Die Interaktion ist bereits durch "defer()" bestätigt
         else:
-            # Sende eine Nachricht, wenn der Bot nicht im Voice-Channel ist
+            # Geben Sie eine Nachricht aus, falls der Bot nicht in einem Sprachkanal ist
             await interaction.followup.send("Ich bin in keinem Sprachkanal.", ephemeral=True)
 
 class SoundboardView(View):
-    def __init__(self, sound_files_with_ranks):
+    def __init__(self, sound_files_with_ranks, user_ranks, sound_emojis):
         super().__init__(timeout=None)
         
         for sound_file, rank_and_points in sound_files_with_ranks:
-            self.add_item(SoundboardButton(sound_file, *rank_and_points))
+            self.add_item(SoundboardButton(sound_file, *rank_and_points, user_ranks, sound_emojis))
 
         if sound_files_with_ranks:  # Wenn es Sound-Dateien gibt, dann haben wir Suchergebnisse
             refresh_button = RefreshButton(label="Zurücksetzen", style=discord.ButtonStyle.grey, custom_id="refresh_button")
@@ -178,8 +199,10 @@ async def soundboard(ctx: commands.Context):
     # Überprüfen, ob der Befehl von jemandem in einem Sprachkanal gesendet wurde
         # Ihr bisheriger Code für das Soundboard ...
     # Sende den Suchbutton am Ende des Befehls
+    ranks, user_ranks, sound_emojis = load_ranks()
+
     search_button = SearchButton()
-    view = SoundboardView(sound_files_with_ranks=[])  # initial leer, bis Suche abgeschlossen ist
+    view = SoundboardView(sound_files_with_ranks=[], user_ranks=user_ranks, sound_emojis=sound_emojis)
     view.add_item(search_button)  # Füge den Suchbutton zur Ansicht hinzu
     await ctx.send("Klicke auf den Button um nach Sounds zu suchen, oder benutze das Soundboard:", view=view)
 
@@ -206,7 +229,7 @@ async def soundboard(ctx: commands.Context):
     
     # Erstelle eine Liste von SoundboardViews, jede mit bis zu MAX_BUTTONS_PER_MESSAGE Buttons
     sound_files_chunks = [sound_files_with_ranks[i:i + MAX_BUTTONS_PER_MESSAGE] for i in range(0, len(sound_files_with_ranks), MAX_BUTTONS_PER_MESSAGE)]
-    views = [SoundboardView(chunk) for chunk in sound_files_chunks]
+    views = [SoundboardView(chunk, user_ranks, sound_emojis) for chunk in sound_files_chunks]
 
     # Sende die Views in separaten Nachrichten
     for view in views:
@@ -291,14 +314,36 @@ async def help_command(ctx):
 # Neue Funktion send_rankings hinzufügen
 @bot.command(name='rankings')
 async def send_rankings(ctx: commands.Context):
-    # Erstellen Sie eine sortierte Liste der Benutzerrankings
-    sorted_user_ranks = sorted(user_ranks.items(), key=lambda item: item[1], reverse=True)
+    ranks, user_ranks, sound_emojis = load_ranks()  # Nutzer-Rangdaten laden
+
+    # Stelle sicher, dass user_ranks keine defaultdict ist, sondern ein normales Dictionary
+    if isinstance(user_ranks, collections.defaultdict):
+        user_ranks = {k: v for k, v in user_ranks.items()}
+        
+    # Liste nach EXP sortieren und Klicks mit anzeigen
+    sorted_user_ranks = sorted(user_ranks.items(), key=lambda item: (item[1]['level'], item[1]['exp']), reverse=True)
+    
     if not sorted_user_ranks:
         await ctx.send("Noch keine Rankings vorhanden.")
         return
     
-    # Erstellen Sie eine Nachricht mit den Top-Rankings
-    rankings_description = "\n".join([f"<@{user_id}>: {points} Klick(s)" for user_id, points in sorted_user_ranks])
+     # Erstelle die Rangliste für die Nachricht
+    rankings_description = []
+    for user_id, stats in sorted_user_ranks:
+        try:
+            exp_to_next_level = LEVEL_UP_EXP - stats['exp']  # EXP benötigt für das nächste Level
+            user = await bot.fetch_user(int(user_id))  # Benutzerobjekt mittels ID abrufen
+
+            # Formatiere die Ranking-Eintragung
+            ranking_entry = f"{user.display_name}: {stats['exp']} EXP (Noch {exp_to_next_level} bis Level {stats['level'] + 1}), Level: {stats['level']}"
+            rankings_description.append(ranking_entry)
+        except Exception as e:
+            print(f"Ein Fehler trat auf beim Abrufen des Nutzerprofils: {e}")
+
+    # Nachrichtenbeschreibung zusammensetzen
+    rankings_description = "\n".join(rankings_description)
+
+    # Erstelle eine Embed-Nachricht für die Anzeige
     embed = discord.Embed(title="User Rankings", description=rankings_description, color=0x00ff00)
     await ctx.send(embed=embed)
 

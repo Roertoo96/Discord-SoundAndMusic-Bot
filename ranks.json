@@ -26,7 +26,7 @@
         "710er_Deckel": 14,
         "Baguetteboden": 15,
         "Robbie_mit_Gulle": 14,
-        "Zeizazei": 22,
+        "Zeizazei": 23,
         "kurz_vor_Feierabend": 15,
         "What_next_Meme": 12,
         "Metal_Gear_Solid": 15,
@@ -44,7 +44,7 @@
         "Meruchene": 13,
         "Nein_nein_nein": 13,
         "Wee_Woo": 17,
-        "Gut_Kick_in_die_Runde": 55,
+        "Gut_Kick_in_die_Runde": 56,
         "Bregi_Brae": 40,
         "Kuschkilkur": 13,
         "dongsidangsi": 11,
@@ -54,21 +54,19 @@
         "Fett_mich_ein": 15,
         "Beatbox": 12,
         "Probleme_sind_wie_Brueste": 5,
-        "Sheesh": 9,
+        "Sheesh": 10,
         "Yeet": 11,
         "Noice": 6,
         "Break": 11,
-        "FBI_open_up": 2,
+        "FBI_open_up": 3,
         "A_few_moments_later": 5,
-        "Mentos": 2
+        "Mentos": 6
     },
     "user_ranks": {
-        "222844396553371648": 5,
-        "240557171404701698": 1,
-        "513384522474192916": 11,
-        "766728388382556160": 5,
-        "546699210737844229": 8,
-        "97596873778397184": 6
+        "222844396553371648": {
+            "exp": 70,
+            "level": 3
+        }
     },
     "sound_emojis": {
         "Knock_Knock": "\ud83d\udeaa",
