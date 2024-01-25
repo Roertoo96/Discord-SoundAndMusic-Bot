@@ -10,6 +10,11 @@ import collections
 import math
 from checkos import perform_os_specific_action
 from ranking import load_ranks,save_ranks
+import paramiko
+# import logging
+# logging.basicConfig(level=logging.DEBUG)
+# paramiko.util.log_to_file('paramiko.log')
+
 
 
 ####  Discord Intents  #####
@@ -30,6 +35,7 @@ token = os.getenv('discordbot')
 user_ranks = collections.defaultdict(int)
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 LEVEL_UP_EXP = 100  # Angenommen, jeder Levelaufstieg erfordert 100 EXP.
+passwordpavsrv = os.getenv('pav')
 
 
 
@@ -100,7 +106,6 @@ class SearchModal(Modal):
             await interaction.response.edit_message(view=view)
         else:
             await interaction.response.send_message("Es wurden keine passenden Sounds gefunden.")
-
 
 
 
@@ -186,7 +191,15 @@ async def on_ready():
     print(f'Angemeldet als {bot.user.name}')
 
 
-
+async def run_script_via_ssh(host, port, username, password, command):
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(host, port=port, username=username, password=password, timeout=15)
+        stdin, stdout, stderr = ssh.exec_command(command)
+        return stdout.read().decode('utf-8'), stderr.read().decode('utf-8')
+    finally:
+        ssh.close()
 
 
 #####  Discord commands  #####
@@ -348,8 +361,45 @@ async def send_rankings(ctx: commands.Context):
     await ctx.send(embed=embed)
 
 
-bot.run(token)
 
+
+@bot.command(name='startpal')
+#@commands.has_role('role-to-execute-command')  # Ersetzen Sie 'role-to-execute-command' mit der tatsächlichen Rolle
+async def startpal(ctx):
+    # Setzen Sie hier Ihre SSH Serverdaten ein
+    host = "45.93.251.18"
+    port = 22  # Standardport für SSH
+    username = "root"
+    password = passwordpavsrv
+    command = "cd /home/steam/Steam/steamapps/common/PalServer/ && sudo -u steam ./PalServer.sh"
+    
+    output, error = await run_script_via_ssh(host, port, username, password, command)
+    
+    if error:
+        await ctx.send(f'Es gab einen Fehler beim Ausführen des Skripts: {error}')
+    else:
+        await ctx.send('Skript wurde erfolgreich gestartet:\n' + output)
+
+
+@bot.command(name='stoppal')
+#@commands.has_role('role-to-execute-command')  # Ersetzen Sie 'role-to-execute-command' mit der tatsächlichen Rolle
+async def stoppal(ctx):
+    host = "45.93.251.18"
+    port = 22
+    username = "root"
+    password = passwordpavsrv
+    command = "sudo pkill -f PalServer-Linux-Test"  # Oder verwenden Sie killall, falls bevorzugt
+
+    output, error = await run_script_via_ssh(host, port, username, password, command)
+
+    if error:
+        await ctx.send(f'Es gab einen Fehler beim Stoppen des Servers: {error}')
+    else:
+        await ctx.send('Server wurde erfolgreich gestoppt.')
+
+
+
+bot.run(token)
 
 
 
