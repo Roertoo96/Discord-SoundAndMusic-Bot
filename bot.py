@@ -35,7 +35,8 @@ token = os.getenv('discordbot')
 user_ranks = collections.defaultdict(int)
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 LEVEL_UP_EXP = 100  # Angenommen, jeder Levelaufstieg erfordert 100 EXP.
-passwordpavsrv = os.getenv('pav')
+#passwordpavsrv = os.getenv('pav')
+passwordpavsrv = os.environ.get('pav')
 print(passwordpavsrv)
 
 
