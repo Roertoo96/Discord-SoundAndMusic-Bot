@@ -29,15 +29,15 @@ intents.voice_states = True          # Erlaubt dem Bot, sich √ºber Sprachstatus√
 
 #####    Variablen     #####
 
-media,token = perform_os_specific_action()
+media,token,passwordpavsrv = perform_os_specific_action()
 MAX_BUTTONS_PER_MESSAGE = 20  # Discord erlaubt aktuell maximal 25 Buttons pro Nachricht
 token = os.getenv('discordbot')
 user_ranks = collections.defaultdict(int)
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 LEVEL_UP_EXP = 100  # Angenommen, jeder Levelaufstieg erfordert 100 EXP.
 #passwordpavsrv = os.getenv('pav')
-passwordpavsrv = os.environ.get('pav')
-print(passwordpavsrv)
+# passwordpavsrv = os.environ.get('pav')
+# print(passwordpavsrv)
 
 
 

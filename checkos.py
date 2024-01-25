@@ -20,7 +20,8 @@ def perform_os_specific_action():
     else:
         media = './media/'
         token = os.environ.get('discordbot')
-        return media, token
+        passwordpavsrv = os.environ.get('pav')
+        return media, token, passwordpavsrv
 
 # Media Variable setzen
 media,token = perform_os_specific_action()
