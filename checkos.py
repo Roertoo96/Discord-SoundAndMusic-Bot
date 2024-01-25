@@ -24,4 +24,4 @@ def perform_os_specific_action():
         return media, token, passwordpavsrv
 
 # Media Variable setzen
-media,token = perform_os_specific_action()
+media,token,passwordpavsrv = perform_os_specific_action()
