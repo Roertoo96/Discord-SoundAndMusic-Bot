@@ -36,6 +36,7 @@ user_ranks = collections.defaultdict(int)
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 LEVEL_UP_EXP = 100  # Angenommen, jeder Levelaufstieg erfordert 100 EXP.
 passwordpavsrv = os.getenv('pav')
+print(passwordpavsrv)
 
 
 
@@ -391,7 +392,7 @@ async def stoppal(ctx):
     command = "sudo pkill -f PalServer-Linux-Test"  # Oder verwenden Sie killall, falls bevorzugt
 
     output, error = await run_script_via_ssh(host, port, username, password, command)
-
+    print(output,error)
     if error:
         await ctx.send(f'Es gab einen Fehler beim Stoppen des Servers: {error}')
     else:
