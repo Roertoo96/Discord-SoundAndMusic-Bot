@@ -59,6 +59,7 @@ token = os.getenv('discordbot')
 user_ranks = collections.defaultdict(int)
 opus_lib_path = '/opt/homebrew/lib/libopus.dylib'
 LEVEL_UP_EXP = 100  # Angenommen, jeder Levelaufstieg erfordert 100 EXP.
+pw = passwordpavsrv
 #passwordpavsrv = os.getenv('pav')
 # passwordpavsrv = os.environ.get('pav')
 # print(passwordpavsrv)
@@ -453,7 +454,7 @@ async def restart(ctx):
     host = "45.93.251.18"
     port = 22
     username = "root"
-    password = passwordpavsrv  # Setzen Sie Ihr Passwort sicher
+    password = pw  # Setzen Sie Ihr Passwort sicher
     reboot_command = "sudo reboot"
     
     await ctx.send(f"⚠ Versuche, den Server `{host}` neu zu starten. Bitte warten...")
@@ -482,7 +483,7 @@ async def startpal(ctx):
     host = "45.93.251.18"
     port = 22
     username = "root"
-    password = passwordpavsrv
+    password = pw
     command = "cd /home/steam/Steam/steamapps/common/PalServer/ && sudo -u steam ./PalServer.sh"
 
     # Führe das SSH-Kommando aus, ohne zuvor zu pingen
