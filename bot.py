@@ -77,7 +77,7 @@ class ServerStatusMonitor(commands.Cog):
     @tasks.loop(minutes=1.0)
     async def server_monitor(self):
         host = "45.93.251.18"
-        channel = self.bot.get_channel(YOUR_CHANNEL_ID)
+        channel = self.bot.get_channel(1200120474198343871)
         status = await ping_server(host)
         if status != self.server_status:
             self.server_status = status
