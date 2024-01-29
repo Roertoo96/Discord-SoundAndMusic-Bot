@@ -11,11 +11,35 @@ import math
 from checkos import perform_os_specific_action
 from ranking import load_ranks,save_ranks
 import paramiko
+import asyncio
+import subprocess
+from discord.ext import tasks
+
 # import logging
 # logging.basicConfig(level=logging.DEBUG)
 # paramiko.util.log_to_file('paramiko.log')
 
+# Globale Funktion zum Pingen eines Servers
+async def ping_server(host):
+    try:
+        cmd = ['ping', '-c', '1', '-W', '5', host] if platform.system().lower() != 'windows' else ['ping', '-n', '1', '-w', '5000', host]
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = await proc.communicate()
+        return proc.returncode == 0
+    except Exception as e:
+        print(f"Error during ping: {e}")
+        return False
 
+# Globale Funktion zum Ausführen eines SSH-Befehls
+async def run_script_via_ssh(host, port, username, password, command):
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(host, port=port, username=username, password=password, timeout=15)
+        stdin, stdout, stderr = ssh.exec_command(command)
+        return stdout.read().decode('utf-8'), stderr.read().decode('utf-8')
+    finally:
+        ssh.close()
 
 ####  Discord Intents  #####
 
@@ -39,6 +63,31 @@ LEVEL_UP_EXP = 100  # Angenommen, jeder Levelaufstieg erfordert 100 EXP.
 # passwordpavsrv = os.environ.get('pav')
 # print(passwordpavsrv)
 
+
+
+
+
+# Classe für den Status-Monitor des Servers
+class ServerStatusMonitor(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.server_status = False
+        self.server_monitor.start()
+
+    @tasks.loop(minutes=1.0)
+    async def server_monitor(self):
+        host = "45.93.251.18"
+        channel = self.bot.get_channel(YOUR_CHANNEL_ID)
+        status = await ping_server(host)
+        if status != self.server_status:
+            self.server_status = status
+            message = f":green_circle: Der Server `{host}` ist jetzt erreichbar." if status else f":red_circle: Der Server `{host}` ist offline."
+            if channel:
+                await channel.send(message)
+
+    @server_monitor.before_loop
+    async def before_server_monitor(self):
+        await self.bot.wa
 
 
 ####   opus wird nur für den  Mac benötigt   #####
@@ -193,15 +242,7 @@ async def on_ready():
     print(f'Angemeldet als {bot.user.name}')
 
 
-async def run_script_via_ssh(host, port, username, password, command):
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        ssh.connect(host, port=port, username=username, password=password, timeout=15)
-        stdin, stdout, stderr = ssh.exec_command(command)
-        return stdout.read().decode('utf-8'), stderr.read().decode('utf-8')
-    finally:
-        ssh.close()
+
 
 
 #####  Discord commands  #####
@@ -365,41 +406,105 @@ async def send_rankings(ctx: commands.Context):
 
 
 
-@bot.command(name='startpal')
-#@commands.has_role('role-to-execute-command')  # Ersetzen Sie 'role-to-execute-command' mit der tatsächlichen Rolle
-async def startpal(ctx):
-    # Setzen Sie hier Ihre SSH Serverdaten ein
+
+async def ping_server(host):
+    try:
+        # Konstruiere den Ping-Befehl basierend auf dem Betriebssystem
+        cmd = ['ping', '-c', '1', '-W', '5', host] if platform.system().lower() != 'windows' else ['ping', '-n', '1', '-w', '5000', host]
+        
+        # Führe den Ping-Befehl aus
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        # Warte, bis der Ping-Befehl abgeschlossen ist
+        stdout, stderr = await proc.communicate()
+        
+        # Überprüfe den Rückgabecode des Pings
+        return proc.returncode == 0
+    except Exception as e:
+        print(f"Error during ping: {e}")
+        return False
+
+
+async def run_script_via_ssh(host, port, username, password, command):
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(host, port=port, username=username, password=password, timeout=15)
+        stdin, stdout, stderr = ssh.exec_command(command)
+        return stdout.read().decode('utf-8'), stderr.read().decode('utf-8')
+    finally:
+        ssh.close()
+
+
+
+
+# Funktion, um die Discord Fehlermeldung zu senden
+async def send_unreachable_message(ctx, host):
+    embed = discord.Embed(
+        title="Serverfehler",
+        description=f":red_circle: Der Server {host} ist nicht erreichbar. Bitte überprüfen Sie den Serverstatus.",
+        color=discord.Color.red()
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name='restart')
+async def restart(ctx):
     host = "45.93.251.18"
-    port = 22  # Standardport für SSH
+    port = 22
     username = "root"
-    password = passwordpavsrv
-    command = "cd /home/steam/Steam/steamapps/common/PalServer/ && sudo -u steam ./PalServer.sh"
+    password = passwordpavsrv  # Setzen Sie Ihr Passwort sicher
+    reboot_command = "sudo reboot"
     
-    output, error = await run_script_via_ssh(host, port, username, password, command)
+    await ctx.send(f"⚠ Versuche, den Server `{host}` neu zu starten. Bitte warten...")
+    _, error = await run_script_via_ssh(host, port, username, password, reboot_command)
     
     if error:
-        await ctx.send(f'Es gab einen Fehler beim Ausführen des Skripts: {error}')
+        await ctx.send(f"Fehler beim Ausführen des Neustartbefehls: {error}")
     else:
-        await ctx.send('Skript wurde erfolgreich gestartet:\n' + output)
+        await ctx.send(f"🔄 Der Server `{host}` wird neu gestartet. Der Status wird in Kürze überprüft...")
+        await asyncio.sleep(15)
+        
+        for i in range(10):
+            if await ping_server(host):
+                await ctx.send(f"✅ Der Server `{host}` ist wieder erreichbar.")
+                return
+            else:
+                await asyncio.sleep(30)
+
+        await ctx.send(f"❌ Der Server `{host}` ist nicht innerhalb der erwarteten Zeit erreichbar geworden.")
 
 
-@bot.command(name='stoppal')
-#@commands.has_role('role-to-execute-command')  # Ersetzen Sie 'role-to-execute-command' mit der tatsächlichen Rolle
-async def stoppal(ctx):
+# Stellen Sie sicher, dass Sie den `startpal`-Befehl anpassen, um die Ping-Überprüfung zu verwenden
+@bot.command(name='startpal')
+async def startpal(ctx):
+    # Setzen Sie hier Ihre SSH Serverdaten ein
     host = "45.93.251.18"
     port = 22
     username = "root"
     password = passwordpavsrv
-    command = "sudo pkill -f PalServer-Linux-Test"  # Oder verwenden Sie killall, falls bevorzugt
+    command = "cd /home/steam/Steam/steamapps/common/PalServer/ && sudo -u steam ./PalServer.sh"
 
-    output, error = await run_script_via_ssh(host, port, username, password, command)
-    print(output,error)
-    if error:
-        await ctx.send(f'Es gab einen Fehler beim Stoppen des Servers: {error}')
-    else:
-        await ctx.send('Server wurde erfolgreich gestoppt.')
+    # Führe das SSH-Kommando aus, ohne zuvor zu pingen
+    try:
+        output, error = await run_script_via_ssh(host, port, username, password, command)
+        if error:
+            error_message = (error[:1900] if len(error) > 1900 else error) + '...(gekürzt)'
+            await ctx.send(f"Es gab einen Fehler beim Ausführen des Skripts: ```{error_message}```")
+        else:
+            await ctx.send(f"Skript wurde erfolgreich auf `{host}` gestartet: ```{output[:1900]}```")  # Output gekürzt, falls zu lang
+    except Exception as e:
+        await ctx.send("Beim Versuch, den Server zu starten, ist ein unerwarteter Fehler aufgetreten. Bitte überprüfen Sie die Serverkonsole oder kontaktieren Sie den Administrator.")
+        print(f"Fehler beim Ausführen von startpal: {e}")
 
 
+
+
+
+
+
+
+bot.add_cog(ServerStatusMonitor(bot))
 
 bot.run(token)
 

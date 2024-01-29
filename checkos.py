@@ -4,24 +4,16 @@ import platform
 
 def perform_os_specific_action():
     current_os = platform.system()
+    media = './media/'
+    token = os.environ.get('discordbot')
+    passwordpavsrv = os.environ.get('pav')
 
     if current_os == "Windows":
         media = r"C:/Users/Andre/OneDrive/Github/PROST/media/"
-        token = os.getenv('discordbot')
-        return media, token
-        # Hier den Code für Windows hinzufügen
-
-    elif current_os == "Darwin":  # "Darwin" ist der Systemname für macOS
+    elif current_os == "Darwin":  # macOS
         media = './media/'
-        token = os.environ.get('discordbot')
-        return media, token
-        # Hier den Code für macOS hinzufügen
-
-    else:
-        media = './media/'
-        token = os.environ.get('discordbot')
-        passwordpavsrv = os.environ.get('pav')
-        return media, token, passwordpavsrv
+    
+    return media, token, passwordpavsrv
 
 # Media Variable setzen
 media,token,passwordpavsrv = perform_os_specific_action()
