@@ -2,7 +2,7 @@ import discord
 import platform
 from discord.ext import commands
 from discord.ext.commands import DefaultHelpCommand
-from discord.ui import Button, View, Modal, InputText
+from discord.ui import Button, View, Modal, TextInput
 import os
 import json
 import aiohttp  # um die Dateien herunterzuladen
