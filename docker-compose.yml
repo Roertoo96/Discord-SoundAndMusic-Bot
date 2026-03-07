@@ -7,8 +7,9 @@ services:
     volumes:
       - ./media:/app/media
     environment:
-      - discordbot=${discordbot}
-      - pav=${pav}
+      - discordbot_p1=MTE3NDM0NDgyOTgyMDQ3NzQ1MA.G9LeQ7
+      - discordbot_p2=.bkB7MHVoI45TNEXEeIOamyQwfKbePjo1A2LPLA
+      - pav=qZ*LP2YIgHc##oF1fGry
     command: python bot.py
 
   music-bot:
@@ -19,7 +20,8 @@ services:
     volumes:
       - ./media:/app/media
     environment:
-      - discordmusicbot=${discordmusicbot}
+      - discordmusicbot_p1=MTE3NjA3ODI2ODQ4NzcwODcxMw.GlKw_Q
+      - discordmusicbot_p2=.KwCyrxq2tNT-aPIaq8jrCPzTKF-AKMrd0rG2j8
     command: python music.py
 
   web-ui:

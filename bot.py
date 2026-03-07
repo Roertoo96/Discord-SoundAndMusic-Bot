@@ -25,8 +25,14 @@ from ranking import load_ranks, save_ranks
 
 # Media-Pfad & Fallback-Token
 MEDIA_BASE, token_from_checkos = perform_os_specific_action()
-#TOKEN = ''
-TOKEN = os.getenv("discordbot", token_from_checkos)
+TOKEN = os.getenv("discordbot")
+if not TOKEN:
+    p1 = os.getenv("discordbot_p1", "")
+    p2 = os.getenv("discordbot_p2", "")
+    if p1 and p2:
+        TOKEN = p1 + p2
+    else:
+        TOKEN = token_from_checkos
 
 MAX_BUTTONS_PER_MESSAGE = 20
 OPUS_LIB_PATH = "/opt/homebrew/lib/libopus.dylib"          # macOS

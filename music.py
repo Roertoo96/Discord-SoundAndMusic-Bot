@@ -7,6 +7,11 @@ import yt_dlp
 
 
 token = os.environ.get('discordmusicbot')
+if not token:
+    p1 = os.environ.get('discordmusicbot_p1', '')
+    p2 = os.environ.get('discordmusicbot_p2', '')
+    if p1 and p2:
+        token = p1 + p2
 
 
 intents = discord.Intents.default()
