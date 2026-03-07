@@ -1,5 +1,7 @@
 import os
 import json
+import subprocess
+import time
 from flask import Flask, request, render_template_string, redirect, url_for, flash, send_from_directory
 from werkzeug.utils import secure_filename
 
@@ -174,6 +176,7 @@ HTML_TEMPLATE = """
         <header>
             <h1>Soundboard Manager</h1>
             <p class="subtitle">Verwalte deine Sounds, Ordner (Kategorien) und Reihenfolge</p>
+            <input type="text" id="searchInput" placeholder="Suche nach Sounds..." style="width: 100%; max-width: 600px; margin-top: 1.5rem; padding: 0.8rem 1.2rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(30, 41, 59, 0.8); color: white; font-size: 1.1rem; outline: none; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
         </header>
 
         {% with messages = get_flashed_messages() %}
@@ -204,7 +207,35 @@ HTML_TEMPLATE = """
                 <form action="{{ url_for('create_category') }}" method="post" class="upload-form" style="margin-top: 1rem;">
                     <input type="text" name="new_category" class="cat-select" placeholder="Ordnername..." required style="flex-grow: 1;">
                     <button type="submit" class="btn btn-primary">Erstellen</button>
-                </form>
+            </div>
+            <div style="flex: 1; min-width: 300px; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 2rem;">
+                <h2>Sound aufnehmen 🎤</h2>
+                <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;" class="upload-form">
+                    
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button id="startRecordBtn" class="btn btn-primary" onclick="startRecording()">Start</button>
+                        <button id="stopRecordBtn" class="btn btn-danger" onclick="stopRecording()" disabled>Stop</button>
+                    </div>
+                    
+                    <div id="previewContainer" style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <p style="margin:0;font-size:0.9rem;color:#cbd5e1;">Vorschau:</p>
+                        <audio id="recordPreview" controls style="width: 100%; height: 36px;"></audio>
+                        
+                        <input type="text" id="recordName" class="cat-select" placeholder="Name für den Sound..." style="margin-top:0.5rem;">
+                        <select id="recordCategory" class="cat-select">
+                            {% for cat in categories %}
+                                <option value="{{ cat }}">{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+                            <button id="saveRecordBtn" class="btn btn-primary" onclick="saveRecording()">Speichern</button>
+                            <button id="previewDiscordBtn" class="btn btn-primary" onclick="previewOnDiscord()">🔊 Auf Discord</button>
+                            <button id="discardRecordBtn" class="btn btn-secondary" onclick="discardRecording()">Verwerfen</button>
+                        </div>
+                    </div>
+
+                    <div id="recordStatus" style="color: #cbd5e1; font-size: 0.9rem; margin-top: 0.5rem;"></div>
+                </div>
             </div>
         </div>
 
@@ -242,6 +273,9 @@ HTML_TEMPLATE = """
                             </select>
                         </form>
                         <div class="order-buttons">
+                            <form action="{{ url_for('play_on_server', filename=sound.filename) }}" method="post" style="display:inline-block;">
+                                <button type="submit" class="btn btn-primary" title="Im Discord abspielen">🔊</button>
+                            </form>
                             <form action="{{ url_for('move_sound', filename=sound.filename, direction='up') }}" method="post">
                                 <button type="submit" class="btn btn-secondary" title="Nach oben">▲</button>
                             </form>
@@ -263,6 +297,159 @@ HTML_TEMPLATE = """
         {% endfor %}
         
     </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let recordedBlob = null;
+
+        async function startRecording() {
+            try {
+                discardRecording(); // Clean up prev session if any
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    recordedBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    audioChunks = [];
+                    
+                    document.getElementById("recordPreview").src = URL.createObjectURL(recordedBlob);
+                    document.getElementById("previewContainer").style.display = "flex";
+                    document.getElementById("recordStatus").innerText = "Aufnahme beendet. Bitte Name vergeben und Speichern.";
+                    
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                };
+
+                audioChunks = [];
+                mediaRecorder.start();
+                document.getElementById("startRecordBtn").disabled = true;
+                document.getElementById("stopRecordBtn").disabled = false;
+                document.getElementById("recordStatus").innerText = "Aufnahme läuft... 🔴";
+            } catch (err) {
+                alert("Fehler beim Zugriff auf das Mikrofon! Stelle sicher, dass du Mikrofon-Berechtigungen erteilt hast und über HTTPS zugreifst, wenn es kein localhost ist. Error: " + err);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+                document.getElementById("startRecordBtn").disabled = false;
+                document.getElementById("stopRecordBtn").disabled = true;
+            }
+        }
+
+        function discardRecording() {
+            recordedBlob = null;
+            document.getElementById("recordPreview").src = "";
+            document.getElementById("previewContainer").style.display = "none";
+            document.getElementById("recordName").value = "";
+            document.getElementById("recordStatus").innerText = "";
+            document.getElementById("startRecordBtn").disabled = false;
+            document.getElementById("stopRecordBtn").disabled = true;
+        }
+
+        async function previewOnDiscord() {
+            if (!recordedBlob) return;
+            
+            const formData = new FormData();
+            formData.append("file", recordedBlob, "recording.webm");
+            
+            document.getElementById("previewDiscordBtn").disabled = true;
+            document.getElementById("recordStatus").innerText = "Probehören wird gestartet...";
+            
+            try {
+                const response = await fetch("{{ url_for('play_preview') }}", {
+                    method: "POST",
+                    body: formData
+                });
+                if(response.ok) {
+                    document.getElementById("recordStatus").innerText = "Wird im Discord abgespielt!";
+                } else {
+                    document.getElementById("recordStatus").innerText = "Fehler beim Abspielen!";
+                }
+            } catch(e) {
+                document.getElementById("recordStatus").innerText = "Verbindungsfehler!";
+            } finally {
+                document.getElementById("previewDiscordBtn").disabled = false;
+            }
+        }
+
+        async function saveRecording() {
+            if (!recordedBlob) return;
+            
+            const titleInput = document.getElementById("recordName").value.trim();
+            if(!titleInput) {
+                alert("Bitte einen Namen für den Sound eingeben!");
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append("file", recordedBlob, "recording.webm");
+            formData.append("name", titleInput);
+            formData.append("category", document.getElementById("recordCategory").value);
+            
+            document.getElementById("saveRecordBtn").disabled = true;
+            document.getElementById("recordStatus").innerText = "Wird gespeichert und konvertiert...";
+            
+            try {
+                const response = await fetch("{{ url_for('upload_voice') }}", {
+                    method: "POST",
+                    body: formData
+                });
+                if(response.ok) {
+                    window.location.reload();
+                } else {
+                    document.getElementById("recordStatus").innerText = "Fehler beim Speichern!";
+                    document.getElementById("saveRecordBtn").disabled = false;
+                }
+            } catch(e) {
+                document.getElementById("recordStatus").innerText = "Verbindungsfehler!";
+                document.getElementById("saveRecordBtn").disabled = false;
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            const searchInput = document.getElementById("searchInput");
+            const categorySections = document.querySelectorAll(".category-section");
+
+            if (searchInput) {
+                searchInput.addEventListener("input", (e) => {
+                    const term = e.target.value.toLowerCase();
+                    
+                    categorySections.forEach(section => {
+                        let hasVisibleSounds = false;
+                        const cards = section.querySelectorAll(".sound-card");
+                        
+                        cards.forEach(card => {
+                            const titleElement = card.querySelector(".sound-title");
+                            if (titleElement) {
+                                const filename = titleElement.innerText.toLowerCase();
+                                if (filename.includes(term)) {
+                                    card.style.display = "flex";
+                                    hasVisibleSounds = true;
+                                } else {
+                                    card.style.display = "none";
+                                }
+                            }
+                        });
+                        
+                        // Hide the whole category if it's empty during search, unless search is empty
+                        if (hasVisibleSounds || term === "") {
+                            section.style.display = "block";
+                        } else {
+                            section.style.display = "none";
+                        }
+                    });
+                });
+            }
+        });
+    </script>
 </body>
 </html>
 """
@@ -324,6 +511,70 @@ def upload_file():
     else:
         flash('Ungültiges Format. Nur .mp3 und .wav sind erlaubt.')
     return redirect(url_for('index'))
+
+@app.route('/upload_voice', methods=['POST'])
+def upload_voice():
+    if 'file' not in request.files:
+        return "No file", 400
+    file = request.files['file']
+    name = request.form.get('name', 'Sprachnotiz').strip()
+    category = request.form.get('category', 'Aktuelle Sounds')
+    
+    if not name:
+        name = "Sprachnotiz"
+        
+    safe_name = secure_filename(name)
+    if not safe_name: safe_name = f"voice_{int(time.time())}"
+    final_filename = safe_name + ".mp3"
+    
+    webm_path = os.path.join(MEDIA_FOLDER, f"temp_{int(time.time())}.webm")
+    mp3_path = os.path.join(MEDIA_FOLDER, final_filename)
+    
+    file.save(webm_path)
+    
+    try:
+        # Convert webm to mp3 using ffmpeg (which is available in docker)
+        subprocess.run(["ffmpeg", "-y", "-i", webm_path, "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k", mp3_path], 
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(webm_path):
+            os.remove(webm_path)
+            
+        meta = load_metadata()
+        meta["sounds"][final_filename] = {"category": category, "order": 999}
+        save_metadata(meta)
+        flash(f'Voice-Aufnahme "{final_filename}" erfolgreich in Bereich "{category}" gespeichert.')
+        return "OK", 200
+    except subprocess.CalledProcessError as e:
+        if os.path.exists(webm_path): os.remove(webm_path)
+        print("FFmpeg error:", e)
+        return "Error converting", 500
+
+@app.route('/play_preview', methods=['POST'])
+def play_preview():
+    if 'file' not in request.files:
+        return "No file", 400
+    file = request.files['file']
+    
+    webm_path = os.path.join(MEDIA_FOLDER, "preview.webm")
+    mp3_path = os.path.join(MEDIA_FOLDER, "preview.mp3")
+    
+    file.save(webm_path)
+    
+    try:
+        subprocess.run(["ffmpeg", "-y", "-i", webm_path, "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k", mp3_path], 
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(webm_path):
+            os.remove(webm_path)
+            
+        # Trigger play in discord
+        with open(os.path.join(MEDIA_FOLDER, 'play_request.txt'), 'w', encoding='utf-8') as f:
+            f.write("preview.mp3")
+            
+        return "OK", 200
+    except subprocess.CalledProcessError as e:
+        if os.path.exists(webm_path): os.remove(webm_path)
+        print("FFmpeg error:", e)
+        return "Error converting", 500
 
 @app.route('/delete/<filename>', methods=['POST'])
 def delete_file(filename):
@@ -431,6 +682,14 @@ def delete_category():
 @app.route('/media/<filename>')
 def play_audio(filename):
     return send_from_directory(MEDIA_FOLDER, filename)
+
+@app.route('/play_server/<filename>', methods=['POST'])
+def play_on_server(filename):
+    req_file = os.path.join(MEDIA_FOLDER, 'play_request.txt')
+    with open(req_file, 'a', encoding='utf-8') as f:
+        f.write(filename + '\n')
+    flash(f'{filename} wird im Discord abgespielt!')
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

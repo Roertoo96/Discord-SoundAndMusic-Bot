@@ -191,41 +191,7 @@ warnings.filterwarnings("ignore", category=ResourceWarning, module="discord.play
 # UI-Komponenten
 ############################################
 
-class SearchButton(Button):
-    def __init__(self):
-        super().__init__(label="Suche nach Sounds", style=discord.ButtonStyle.primary)
 
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(SearchModal())
-
-
-class SearchModal(Modal):
-    def __init__(self):
-        super().__init__(title="Sound-Suche")
-        self.search_input = TextInput(
-            label="Wonach möchtest du suchen?",
-            placeholder="Gebe einen Suchbegriff ein…",
-            custom_id="search_query",
-            style=discord.TextStyle.short,
-            min_length=1,
-            required=True
-        )
-        self.add_item(self.search_input)
-
-    async def callback(self, interaction: discord.Interaction):
-        query = str(self.search_input.value).strip().lower()
-        all_files = [f for f in os.listdir("./media") if f.lower().endswith((".mp3", ".wav"))]
-        sorted_files = sorted(all_files, key=lambda sf: ranks.get(os.path.splitext(sf)[0], 0), reverse=True)
-        search_results = [
-            (sf, (idx, ranks.get(os.path.splitext(sf)[0], 0)))
-            for idx, sf in enumerate(sorted_files, start=1)
-            if query in os.path.splitext(sf)[0].lower()
-        ]
-        if not search_results:
-            await interaction.response.send_message("Es wurden keine passenden Sounds gefunden.", ephemeral=True)
-        else:
-            view = SoundboardView(search_results, user_ranks, sound_emojis)
-            await interaction.response.send_message("Suchergebnisse:", view=view, ephemeral=True)
 
 
 class RefreshButton(Button):
@@ -234,7 +200,6 @@ class RefreshButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         view = SoundboardView([], user_ranks, sound_emojis)
-        view.add_item(SearchButton())
         await interaction.response.edit_message(view=view)
 
 
@@ -458,7 +423,60 @@ class CategoryFolderView(View):
         for cat, items in categories_map.items():
             if not items and cat == "Uncategorized": continue
             self.add_item(CategoryFolderButton(cat, items))
-        self.add_item(SearchButton())
+
+############################################
+# Web UI Watcher
+############################################
+
+@tasks.loop(seconds=1)
+async def web_ui_watcher():
+    req_file = os.path.join(MEDIA_BASE, "play_request.txt")
+    if os.path.exists(req_file):
+        try:
+            with open(req_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            os.remove(req_file)
+            for line in lines:
+                filename = line.strip()
+                if not filename: continue
+                # We play on the first active guild
+                played = False
+                for guild_id, chan_id in getattr(bot, "_last_vc_channel", {}).items():
+                    guild = bot.get_guild(guild_id)
+                    if not guild: continue
+                    target_channel = guild.get_channel(chan_id)
+                    if not target_channel: continue
+                    vc = guild.voice_client
+                    if vc is None:
+                        try:
+                            vc = await target_channel.connect()
+                        except:
+                            continue
+                    try:
+                        if vc.is_playing():
+                            vc.stop()
+                        audio_path = os.path.join(MEDIA_BASE, filename)
+                        if not os.path.exists(audio_path): continue
+                        source = make_ffmpeg_source_local(audio_path)
+                        def _after(err: Optional[Exception], _vc=vc, _source=source):
+                            try:
+                                if hasattr(_source, "cleanup"): _source.cleanup()
+                            except: pass
+                            try:
+                                asyncio.get_running_loop().create_task(ensure_keepalive(_vc))
+                            except: pass
+                        vc.play(source, after=_after)
+                        played = True
+                    except Exception as e:
+                        print("Web Play Error:", e)
+                    if played:
+                        break
+        except Exception as e:
+            print("Web UI Watcher Error:", e)
+
+@web_ui_watcher.before_loop
+async def before_web_ui_watcher():
+    await bot.wait_until_ready()
 
 ############################################
 # Bot-Klasse & Instanz
@@ -475,6 +493,7 @@ class SoundBot(commands.Bot):
         connector = aiohttp.TCPConnector(limit=20, force_close=True)
         self.http_session = aiohttp.ClientSession(connector=connector)
         await self.add_cog(ServerStatusMonitor(self, channel_id=1200120616230076496))
+        web_ui_watcher.start()
 
     async def close(self):
         try:
@@ -607,19 +626,47 @@ async def list_files(ctx: commands.Context):
 @bot.command(name="help")
 async def help_command(ctx: commands.Context):
     embed = discord.Embed(title="Hilfe", description="Liste aller verfügbaren Befehle", color=0x00FF00)
-    embed.add_field(name="Befehl", value="`!help`\n`!upload`\n`!delete`\n`!list`\n`!soundboard`\n`!setemoji`\n`!rankings`\n`!restart`\n`!startpal`", inline=True)
+    embed.add_field(name="Befehl", value="`!help`\n`!upload`\n`!delete`\n`!list`\n`!soundboard`\n`!search`\n`!setemoji`\n`!rankings`\n`!restart`\n`!startpal`", inline=True)
     embed.add_field(name="Beschreibung", value=(
         "Zeigt diese Hilfe an\n"
         "Lädt eine MP3/WAV hoch\n"
         "Löscht eine Datei\n"
         "Listet Dateien\n"
         "Öffnet das Soundboard\n"
+        "Suche nach Sounds im Chat\n"
         "Setzt Emoji für Sound\n"
         "Zeigt User-Rankings\n"
         "Rebootet Server per SSH\n"
         "Startet PalServer per SSH"
     ), inline=True)
     await ctx.send(embed=embed)
+
+
+@bot.command(name="search", help="Suche nach Sounds direkt im Chat. Beispiel: !search hallo")
+async def search_cmd(ctx: commands.Context, *, query: str):
+    if ctx.author.voice is None:
+        await ctx.send("Du solltest in einem Sprachkanal sein, um Sounds abzuspielen.")
+    
+    query = query.strip().lower()
+    if not os.path.exists("./media"):
+        await ctx.send("Keine Sounds vorhanden.")
+        return
+        
+    all_files = [f for f in os.listdir("./media") if f.lower().endswith((".mp3", ".wav"))]
+    sorted_files = sorted(all_files, key=lambda sf: ranks.get(os.path.splitext(sf)[0], 0), reverse=True)
+    search_results = [
+        (sf, (idx, ranks.get(os.path.splitext(sf)[0], 0)))
+        for idx, sf in enumerate(sorted_files, start=1)
+        if query in os.path.splitext(sf)[0].lower()
+    ]
+    
+    if not search_results:
+        await ctx.send(f"Es wurden keine passenden Sounds für **{query}** gefunden.")
+    else:
+        chunks = [search_results[i:i + MAX_BUTTONS_PER_MESSAGE] for i in range(0, len(search_results), MAX_BUTTONS_PER_MESSAGE)]
+        await ctx.send(f"Suchergebnisse für **{query}**:")
+        for chunk in chunks:
+            await ctx.send(view=SoundboardView(chunk, user_ranks, sound_emojis))
 
 
 @bot.command(name="rankings")
