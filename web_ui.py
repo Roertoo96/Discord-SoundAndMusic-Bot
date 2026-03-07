@@ -1,0 +1,436 @@
+import os
+import json
+from flask import Flask, request, render_template_string, redirect, url_for, flash, send_from_directory
+from werkzeug.utils import secure_filename
+
+app = Flask(__name__)
+app.secret_key = "super_secret_discord_web_ui_key"
+
+MEDIA_FOLDER = './media'
+METADATA_FILE = os.path.join(MEDIA_FOLDER, 'metadata.json')
+os.makedirs(MEDIA_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = {'mp3', 'wav'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def load_metadata():
+    if os.path.exists(METADATA_FILE):
+        try:
+            with open(METADATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if "categories" not in data:
+                    data["categories"] = ["Aktuelle Sounds", "Archiv", "Best of"]
+                if "sounds" not in data:
+                    data["sounds"] = {}
+                return data
+        except:
+            pass
+    return {"categories": ["Aktuelle Sounds", "Archiv", "Best of"], "sounds": {}}
+
+def save_metadata(data):
+    with open(METADATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4)
+
+def get_existing_files():
+    if not os.path.exists(MEDIA_FOLDER):
+        return set()
+    return {f for f in os.listdir(MEDIA_FOLDER) if f.lower().endswith(('.mp3', '.wav'))}
+
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Soundboard Manager</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text-color: #f8fafc;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+                radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+                radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+            color: var(--text-color);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        p.subtitle { color: #94a3b8; font-size: 1.1rem; }
+
+        .glass-panel {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.5rem 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .btn-primary { background-color: var(--accent); color: white; }
+        .btn-primary:hover { background-color: var(--accent-hover); }
+        .btn-danger { background-color: var(--danger); color: white; }
+        .btn-danger:hover { background-color: var(--danger-hover); }
+        .btn-secondary { background-color: #475569; color: white; }
+        .btn-secondary:hover { background-color: #334155; }
+
+        .upload-form {
+            display: flex; gap: 1rem; align-items: center;
+        }
+
+        .category-section {
+            margin-bottom: 3rem;
+        }
+        .category-header {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+            padding-bottom: 0.5rem;
+            color: #e2e8f0;
+        }
+
+        .sound-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .sound-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .sound-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #e2e8f0;
+            word-break: break-all;
+        }
+
+        audio { width: 100%; height: 36px; border-radius: 18px; }
+
+        .controls {
+            display: flex; gap: 0.5rem; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-top: 0.5rem;
+        }
+        
+        .cat-select {
+            background: #1e293b; color: white; border: 1px solid rgba(255,255,255,0.2);
+            padding: 0.4rem; border-radius: 6px; outline: none; flex-grow: 1;
+        }
+        
+        .order-buttons form { display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Soundboard Manager</h1>
+            <p class="subtitle">Verwalte deine Sounds, Ordner (Kategorien) und Reihenfolge</p>
+        </header>
+
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div style="margin-bottom: 1.5rem;">
+                    {% for message in messages %}
+                        <div style="padding: 1rem; background: rgba(59,130,246,0.2); border: 1px solid var(--accent); border-radius: 8px;">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="glass-panel" style="display: flex; gap: 2rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 300px;">
+                <h2>Neuen Sound hochladen</h2>
+                <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data" class="upload-form" style="margin-top: 1rem;">
+                    <input type="file" name="file" accept=".mp3,.wav" style="color: white; width: 100%;">
+                    <select name="category" class="cat-select" style="max-width: 200px;">
+                        {% for cat in categories %}
+                            <option value="{{ cat }}">{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-primary">Hochladen</button>
+                </form>
+            </div>
+            <div style="flex: 1; min-width: 300px; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 2rem;">
+                <h2>Neuen Ordner erstellen</h2>
+                <form action="{{ url_for('create_category') }}" method="post" class="upload-form" style="margin-top: 1rem;">
+                    <input type="text" name="new_category" class="cat-select" placeholder="Ordnername..." required style="flex-grow: 1;">
+                    <button type="submit" class="btn btn-primary">Erstellen</button>
+                </form>
+            </div>
+        </div>
+
+        {% for cat in categories %}
+        <div class="category-section">
+            <div class="category-header" style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                <div>
+                    <form action="{{ url_for('rename_category') }}" method="post" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.5rem;">📂</span>
+                        <input type="hidden" name="old_category" value="{{ cat }}">
+                        <input type="text" name="new_category" value="{{ cat }}" class="cat-select" style="font-size: 1.3rem; font-weight: bold; padding: 0.2rem 0.5rem; background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.3); min-width: 200px;">
+                        <button type="submit" class="btn btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" title="Speichern">💾 Umbenennen</button>
+                    </form>
+                </div>
+                {% if categorized_sounds[cat]|length == 0 %}
+                <form action="{{ url_for('delete_category') }}" method="post" onsubmit="return confirm('Ordner wirklich löschen?');">
+                    <input type="hidden" name="category" value="{{ cat }}">
+                    <button type="submit" class="btn btn-danger" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;">🗑️ Ordner löschen</button>
+                </form>
+                {% endif %}
+            </div>
+            <div class="sound-grid">
+                {% for sound in categorized_sounds[cat] %}
+                <div class="sound-card">
+                    <div class="sound-title">{{ sound.filename }}</div>
+                    <audio controls preload="none">
+                        <source src="{{ url_for('play_audio', filename=sound.filename) }}" type="audio/{{ 'mpeg' if sound.filename.endswith('.mp3') else 'wav' }}">
+                    </audio>
+                    <div class="controls">
+                        <form action="{{ url_for('update_category', filename=sound.filename) }}" method="post" style="flex-grow: 1; margin-right: 0.5rem;">
+                            <select name="category" class="cat-select" onchange="this.form.submit()">
+                                {% for c in categories %}
+                                <option value="{{ c }}" {% if c == cat %}selected{% endif %}>{{ c }}</option>
+                                {% endfor %}
+                            </select>
+                        </form>
+                        <div class="order-buttons">
+                            <form action="{{ url_for('move_sound', filename=sound.filename, direction='up') }}" method="post">
+                                <button type="submit" class="btn btn-secondary" title="Nach oben">▲</button>
+                            </form>
+                            <form action="{{ url_for('move_sound', filename=sound.filename, direction='down') }}" method="post">
+                                <button type="submit" class="btn btn-secondary" title="Nach unten">▼</button>
+                            </form>
+                            <form action="{{ url_for('delete_file', filename=sound.filename) }}" method="post" onsubmit="return confirm('Sound wirklich löschen?');">
+                                <button type="submit" class="btn btn-danger" title="Löschen">✕</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if not categorized_sounds[cat] %}
+                    <p style="color: #64748b; grid-column: 1 / -1;">Keine Sounds in diesem Ordner.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        
+    </div>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    meta = load_metadata()
+    existing = get_existing_files()
+    
+    # Ensure all existing files are in metadata
+    updated = False
+    for f in existing:
+        if f not in meta["sounds"]:
+            meta["sounds"][f] = {"category": "Aktuelle Sounds", "order": 999}
+            updated = True
+    
+    # Cleanup deleted files from metadata
+    deleted = [f for f in meta["sounds"] if f not in existing]
+    for f in deleted:
+        del meta["sounds"][f]
+        updated = True
+        
+    if updated:
+        save_metadata(meta)
+        
+    categorized = {cat: [] for cat in meta["categories"]}
+    for f in meta["sounds"]:
+        if f in existing:
+            cat = meta["sounds"][f]["category"]
+            if cat not in categorized:
+                cat = "Aktuelle Sounds"
+            categorized[cat].append({"filename": f, "order": meta["sounds"][f]["order"]})
+            
+    for cat in categorized:
+        categorized[cat].sort(key=lambda x: (x["order"], x["filename"]))
+        
+    return render_template_string(HTML_TEMPLATE, categories=meta["categories"], categorized_sounds=categorized)
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        flash('Keine Datei übergeben.')
+        return redirect(url_for('index'))
+    file = request.files['file']
+    category = request.form.get('category', 'Aktuelle Sounds')
+    
+    if file.filename == '':
+        flash('Keine Datei ausgewählt.')
+        return redirect(url_for('index'))
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(MEDIA_FOLDER, filename))
+        
+        meta = load_metadata()
+        meta["sounds"][filename] = {"category": category, "order": 999}
+        save_metadata(meta)
+        
+        flash(f'{filename} erfolgreich nach "{category}" hochgeladen.')
+    else:
+        flash('Ungültiges Format. Nur .mp3 und .wav sind erlaubt.')
+    return redirect(url_for('index'))
+
+@app.route('/delete/<filename>', methods=['POST'])
+def delete_file(filename):
+    file_path = os.path.join(MEDIA_FOLDER, filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        meta = load_metadata()
+        if filename in meta["sounds"]:
+            del meta["sounds"][filename]
+            save_metadata(meta)
+        flash(f'{filename} erfolgreich gelöscht.')
+    else:
+        flash('Datei nicht gefunden.')
+    return redirect(url_for('index'))
+
+@app.route('/update_category/<filename>', methods=['POST'])
+def update_category(filename):
+    meta = load_metadata()
+    new_cat = request.form.get('category')
+    if filename in meta["sounds"] and new_cat in meta["categories"]:
+        meta["sounds"][filename]["category"] = new_cat
+        meta["sounds"][filename]["order"] = 999
+        save_metadata(meta)
+        flash(f'{filename} wurde nach "{new_cat}" verschoben.')
+    return redirect(url_for('index'))
+
+@app.route('/move/<filename>/<direction>', methods=['POST'])
+def move_sound(filename, direction):
+    meta = load_metadata()
+    if filename not in meta["sounds"]:
+        return redirect(url_for('index'))
+        
+    cat = meta["sounds"][filename]["category"]
+    existing = get_existing_files()
+    
+    sounds_in_cat = [f for f in meta["sounds"] if meta["sounds"][f]["category"] == cat and f in existing]
+    sounds_in_cat.sort(key=lambda x: (meta["sounds"][x]["order"], x))
+    
+    for i, f in enumerate(sounds_in_cat):
+        meta["sounds"][f]["order"] = i
+        
+    try:
+        idx = sounds_in_cat.index(filename)
+    except ValueError:
+        return redirect(url_for('index'))
+        
+    if direction == 'up' and idx > 0:
+        meta["sounds"][filename]["order"] = idx - 1
+        meta["sounds"][sounds_in_cat[idx-1]]["order"] = idx
+    elif direction == 'down' and idx < len(sounds_in_cat) - 1:
+        meta["sounds"][filename]["order"] = idx + 1
+        meta["sounds"][sounds_in_cat[idx+1]]["order"] = idx
+        
+    save_metadata(meta)
+    return redirect(url_for('index'))
+
+@app.route('/create_category', methods=['POST'])
+def create_category():
+    meta = load_metadata()
+    new_cat = request.form.get('new_category', '').strip()
+    if new_cat and new_cat not in meta["categories"]:
+        meta["categories"].append(new_cat)
+        save_metadata(meta)
+        flash(f'Ordner "{new_cat}" erfolgreich erstellt.')
+    elif new_cat in meta["categories"]:
+        flash(f'Ordner "{new_cat}" existiert bereits.')
+    return redirect(url_for('index'))
+
+@app.route('/rename_category', methods=['POST'])
+def rename_category():
+    meta = load_metadata()
+    old_cat = request.form.get('old_category')
+    new_cat = request.form.get('new_category', '').strip()
+    if old_cat in meta["categories"] and new_cat and new_cat != old_cat:
+        if new_cat not in meta["categories"]:
+            idx = meta["categories"].index(old_cat)
+            meta["categories"][idx] = new_cat
+            # update sounds that belonged to this category
+            for f, data in meta["sounds"].items():
+                if data.get("category") == old_cat:
+                    meta["sounds"][f]["category"] = new_cat
+            save_metadata(meta)
+            flash(f'Ordner erfolgreich zu "{new_cat}" umbenannt.')
+        else:
+            flash(f'Ein Ordner mit dem Namen "{new_cat}" existiert bereits.')
+    return redirect(url_for('index'))
+
+@app.route('/delete_category', methods=['POST'])
+def delete_category():
+    meta = load_metadata()
+    cat = request.form.get('category')
+    if cat in meta["categories"]:
+        meta["categories"].remove(cat)
+        for f, data in meta["sounds"].items():
+            if data.get("category") == cat:
+                meta["sounds"][f]["category"] = "Aktuelle Sounds"
+        
+        if "Aktuelle Sounds" not in meta["categories"]:
+            meta["categories"].insert(0, "Aktuelle Sounds")
+            
+        save_metadata(meta)
+        flash(f'Ordner "{cat}" wurde gelöscht.')
+    return redirect(url_for('index'))
+
+@app.route('/media/<filename>')
+def play_audio(filename):
+    return send_from_directory(MEDIA_FOLDER, filename)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

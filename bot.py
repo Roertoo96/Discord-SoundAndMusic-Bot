@@ -1,4 +1,4 @@
-
+import json
 import os
 import platform
 import asyncio
@@ -86,8 +86,7 @@ def make_ffmpeg_source_local(path: str) -> discord.FFmpegPCMAudio:
     return discord.FFmpegPCMAudio(
         path,
         before_options='-nostdin',
-        options='-vn',
-        stderr=subprocess.DEVNULL
+        options='-vn'
     )
 
 # --- Keep-Alive: endlose Stille via ffmpeg lavfi ---
@@ -96,8 +95,7 @@ def make_silence_source() -> discord.FFmpegPCMAudio:
     return discord.FFmpegPCMAudio(
         source="anullsrc=r=48000:cl=stereo",
         before_options="-nostdin -f lavfi -i",
-        options="-vn -ac 2 -ar 48000",
-        stderr=subprocess.DEVNULL
+        options="-vn -ac 2 -ar 48000"
     )
 
 async def ensure_keepalive(vc: discord.VoiceClient):
@@ -236,9 +234,16 @@ class RefreshButton(Button):
 
 class SoundboardButton(Button):
     def __init__(self, sound_file, rank, points, user_ranks_map, sound_emoji_map):
-        label = os.path.splitext(sound_file)[0]
-        emoji = sound_emoji_map.get(label)
-        super().__init__(label=f"{rank}. {label} ({points})", emoji=emoji)
+        label_base = os.path.splitext(sound_file)[0]
+        emoji = sound_emoji_map.get(label_base)
+        
+        full_label = f"{rank}. {label_base} ({points})"
+        if len(full_label) > 80:
+            allowed_len = 80 - len(f"{rank}.  ({points})") - 3
+            display_label = label_base[:allowed_len] + "..."
+            full_label = f"{rank}. {display_label} ({points})"
+            
+        super().__init__(label=full_label, emoji=emoji)
         self.sound_file = sound_file
         self.user_ranks_map = user_ranks_map
 
@@ -393,6 +398,63 @@ class SoundboardView(View):
             self.add_item(RefreshButton())
 
 ############################################
+# Categories (Ordner) & Views
+############################################
+
+def get_sounds_categorized():
+    meta_path = "./media/metadata.json"
+    files = [f for f in os.listdir("./media") if f.lower().endswith((".mp3", ".wav"))]
+    try:
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            meta = json.load(f)
+    except:
+        meta = {"categories": ["Aktuelle Sounds", "Archiv", "Best of"], "sounds": {}}
+        
+    categories_map = {c: [] for c in meta.get("categories", [])}
+    categories_map["Uncategorized"] = []
+    
+    for f in files:
+        data = meta.get("sounds", {}).get(f, {})
+        cat = data.get("category", "Aktuelle Sounds")
+        if cat not in categories_map:
+            cat = "Aktuelle Sounds"
+            if cat not in categories_map:
+                categories_map[cat] = []
+        categories_map[cat].append({"file": f, "order": data.get("order", 999)})
+        
+    for cat in categories_map:
+        categories_map[cat].sort(key=lambda x: (x["order"], x["file"]))
+        
+    return categories_map
+
+class CategoryFolderButton(Button):
+    def __init__(self, category_name, items):
+        super().__init__(label=f"📁 {category_name} ({len(items)})", style=discord.ButtonStyle.secondary)
+        self.category_name = category_name
+        self.items = items
+        
+    async def callback(self, interaction: discord.Interaction):
+        sound_files_with_ranks = []
+        for idx, item in enumerate(self.items, start=1):
+            sf = item["file"]
+            pts = ranks.get(os.path.splitext(sf)[0], 0)
+            sound_files_with_ranks.append((sf, (idx, pts)))
+            
+        chunks = [sound_files_with_ranks[i:i + MAX_BUTTONS_PER_MESSAGE] for i in range(0, len(sound_files_with_ranks), MAX_BUTTONS_PER_MESSAGE)]
+        
+        await interaction.response.send_message(f"📂 **{self.category_name}**:", ephemeral=True)
+        for chunk in chunks:
+            await interaction.followup.send("\u200b", view=SoundboardView(chunk, user_ranks, sound_emojis), ephemeral=True)
+
+class CategoryFolderView(View):
+    def __init__(self, categories_map):
+        super().__init__(timeout=None)
+        for cat, items in categories_map.items():
+            if not items and cat == "Uncategorized": continue
+            self.add_item(CategoryFolderButton(cat, items))
+        self.add_item(SearchButton())
+
+############################################
 # Bot-Klasse & Instanz
 ############################################
 
@@ -448,10 +510,6 @@ async def on_command_error(ctx, error):
 
 @bot.command(name="soundboard")
 async def soundboard_cmd(ctx: commands.Context):
-    view = SoundboardView([], user_ranks, sound_emojis)
-    view.add_item(SearchButton())
-    await ctx.send("Klicke auf den Button um nach Sounds zu suchen, oder benutze das Soundboard:", view=view)
-
     if ctx.author.voice is None:
         await ctx.send("Du musst in einem Sprachkanal sein, um das Soundboard zu verwenden.")
         return
@@ -474,14 +532,9 @@ async def soundboard_cmd(ctx: commands.Context):
         await ctx.send(f"Voice-Connect fehlgeschlagen: {e}")
         return
 
-    files = [f for f in os.listdir("./media") if f.lower().endswith((".mp3", ".wav"))]
-    sorted_files = sorted(files, key=lambda sf: ranks.get(os.path.splitext(sf)[0], 0), reverse=True)
-    sound_files_with_ranks = [
-        (sf, (idx, ranks.get(os.path.splitext(sf)[0], 0))) for idx, sf in enumerate(sorted_files, start=1)
-    ]
-    chunks = [sound_files_with_ranks[i:i + MAX_BUTTONS_PER_MESSAGE] for i in range(0, len(sound_files_with_ranks), MAX_BUTTONS_PER_MESSAGE)]
-    for chunk in chunks:
-        await ctx.send("\u200b", view=SoundboardView(chunk, user_ranks, sound_emojis))
+    categories_map = get_sounds_categorized()
+    view = CategoryFolderView(categories_map)
+    await ctx.send("📂 Klicke auf einen Ordner, um Sounds abzuspielen, oder nutze die Suche:", view=view)
 
 
 @bot.command(name="setemoji")

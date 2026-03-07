@@ -1,0 +1,25 @@
+# Basis Git Ignorierungen für Python-Projekte
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments (Virtuelle Umgebungen)
+.env
+.venv
+env/
+venv/
+ENV/
+
+# OS / IDE generierte Dateien
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Projektspezifische Medien und Datenbanken
+/media/
+/data/
+
+# Docker
+.dockerignore
