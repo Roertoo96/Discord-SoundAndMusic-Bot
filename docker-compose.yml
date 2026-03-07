@@ -1,60 +1,37 @@
 services:
   main-bot:
-    image: python:3.12-slim
-    container_name: discord-bot-POST
+    build: .
+    container_name: discord-bot-v2
     restart: always
     working_dir: /app
     volumes:
-      - ./:/app
-    environment:
-      - discordbot=${discordbot}
-      - pav=${pav}
-    command: >
-      /bin/sh -c "
-      set -e;
-      apt-get update &&
-      apt-get install -y --no-install-recommends ffmpeg libopus0 libsodium23 iputils-ping &&
-      pip install --no-cache-dir -U pip &&
-      pip uninstall -y py-cord discord.py || true &&
-      pip install --no-cache-dir 'discord.py[voice]' PyNaCl yt-dlp pytube paramiko &&
-      python bot.py
-      "
+      - /data/compose/129/media:/app/media
+    env_file:
+      - /data/compose/129/.env
+    command: python bot.py
 
   music-bot:
-    image: python:3.12-slim
-    container_name: discord-music-bot
+    build: .
+    container_name: discord-music-bot-v2
     restart: always
     working_dir: /app
     volumes:
-      - ./:/app
-    environment:
-      - discordmusicbot=${discordmusicbot}
-    command: >
-      /bin/sh -c "
-      set -e;
-      apt-get update &&
-      apt-get install -y --no-install-recommends ffmpeg libopus0 libsodium23 iputils-ping &&
-      pip install --no-cache-dir -U pip &&
-      pip uninstall -y py-cord discord.py || true &&
-      pip install --no-cache-dir 'discord.py[voice]' PyNaCl yt-dlp pytube paramiko &&
-      python music.py
-      "
+      - /data/compose/129/media:/app/media
+    env_file:
+      - /data/compose/129/.env
+    command: python music.py
 
   web-ui:
-    image: python:3.12-slim
-    container_name: discord-sound-web
+    build: .
+    container_name: discord-sound-web-v2
     restart: always
     working_dir: /app
     ports:
-      - "5000:5000"
+      - "5005:5000"
     volumes:
-      - ./:/app
-    command: >
-      /bin/sh -c "
-      set -e;
-      pip install --no-cache-dir -U pip &&
-      pip install --no-cache-dir flask werkzeug &&
-      python web_ui.py
-      "
+      - /data/compose/129/media:/app/media
+    env_file:
+      - /data/compose/129/.env
+    command: python web_ui.py
 
 
