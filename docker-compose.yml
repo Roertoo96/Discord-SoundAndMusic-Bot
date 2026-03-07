@@ -6,8 +6,9 @@ services:
     working_dir: /app
     volumes:
       - ./media:/app/media
-    env_file:
-      - .env
+    environment:
+      - discordbot=${discordbot}
+      - pav=${pav}
     command: python bot.py
 
   music-bot:
@@ -17,8 +18,8 @@ services:
     working_dir: /app
     volumes:
       - ./media:/app/media
-    env_file:
-      - .env
+    environment:
+      - discordmusicbot=${discordmusicbot}
     command: python music.py
 
   web-ui:
@@ -30,8 +31,6 @@ services:
       - "5005:5000"
     volumes:
       - ./media:/app/media
-    env_file:
-      - .env
     command: python web_ui.py
 
 
