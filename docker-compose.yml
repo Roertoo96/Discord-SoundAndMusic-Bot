@@ -5,9 +5,9 @@ services:
     restart: always
     working_dir: /app
     volumes:
-      - /data/compose/129/media:/app/media
+      - ./media:/app/media
     env_file:
-      - /data/compose/129/.env
+      - .env
     command: python bot.py
 
   music-bot:
@@ -16,9 +16,9 @@ services:
     restart: always
     working_dir: /app
     volumes:
-      - /data/compose/129/media:/app/media
+      - ./media:/app/media
     env_file:
-      - /data/compose/129/.env
+      - .env
     command: python music.py
 
   web-ui:
@@ -29,9 +29,9 @@ services:
     ports:
       - "5005:5000"
     volumes:
-      - /data/compose/129/media:/app/media
+      - ./media:/app/media
     env_file:
-      - /data/compose/129/.env
+      - .env
     command: python web_ui.py
 
 
