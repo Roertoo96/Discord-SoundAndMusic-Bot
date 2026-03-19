@@ -10,6 +10,7 @@ import time
 import subprocess  # für FFmpeg stderr DEVNULL
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from discord.ui import Button, View, Modal, TextInput
 
@@ -38,11 +39,15 @@ MAX_BUTTONS_PER_MESSAGE = 20
 OPUS_LIB_PATH = "/opt/homebrew/lib/libopus.dylib"          # macOS
 LINUX_OPUS_PATH = "/usr/lib/x86_64-linux-gnu/libopus.so.0" # Debian/Ubuntu
 LEVEL_UP_EXP = 100
+EMPTY_VOICE_RESTART_TIMEOUT = 30 * 60
 
 SSH_HOST = "45.93.251.18"
 SSH_PORT = 22
 SSH_USER = "root"
 SSH_PASSWORD = os.environ.get("pav")  # Passwort via ENV setzen!
+RESTART_NOTIFY_CHANNEL_ID = 1174617198191444058
+RESTART_REQUEST_FILE = os.path.join(MEDIA_BASE, "restart_request.txt")
+RESTART_NOTICE_FILE = os.path.join(MEDIA_BASE, "restart_notice.txt")
 
 # Discord Intents
 intents = discord.Intents.default()
@@ -86,6 +91,64 @@ async def run_script_via_ssh(host: str, port: int, username: str, password: str,
         return stdout.read().decode("utf-8"), stderr.read().decode("utf-8")
     finally:
         ssh.close()
+
+def write_restart_notice(source: str):
+    with open(RESTART_NOTICE_FILE, "w", encoding="utf-8") as f:
+        f.write(source.strip() or "Unbekannt")
+
+def request_bot_restart(source: str):
+    write_restart_notice(source)
+    with open(RESTART_REQUEST_FILE, "w", encoding="utf-8") as f:
+        f.write(source.strip() or "Unbekannt")
+
+async def get_restart_notification_channel():
+    channel = bot.get_channel(RESTART_NOTIFY_CHANNEL_ID)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(RESTART_NOTIFY_CHANNEL_ID)
+        except Exception as e:
+            print("Restart notification channel fetch error:", e)
+            return None
+    return channel
+
+async def send_restart_notification():
+    if not os.path.exists(RESTART_NOTICE_FILE):
+        return
+
+    source = "Unbekannt"
+    try:
+        with open(RESTART_NOTICE_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                source = content
+    except Exception as e:
+        print("Restart notice read error:", e)
+
+    channel = await get_restart_notification_channel()
+    if channel is None:
+        return
+
+    try:
+        await channel.send(f"PROST_Bot wurde neu gestartet. Ausgeloest durch: {source}")
+        os.remove(RESTART_NOTICE_FILE)
+    except Exception as e:
+        print("Restart notification send error:", e)
+
+def get_human_members_in_channel(channel: Optional[discord.abc.GuildChannel]):
+    if channel is None or not hasattr(channel, "members"):
+        return []
+    return [member for member in channel.members if not member.bot]
+
+async def perform_bot_restart(source: str):
+    write_restart_notice(source)
+    channel = await get_restart_notification_channel()
+    if channel is not None:
+        try:
+            await channel.send(f"PROST_Bot wird jetzt neu gestartet. Ausgeloest durch: {source}")
+        except Exception as e:
+            print("Restart pending notification send error:", e)
+    print(f"Restart request received from {source}. Shutting down bot for Docker restart.")
+    await bot.close()
 
 # FFmpeg-Quelle für LOKALE Dateien (vermeidet ResourceWarnings)
 def make_ffmpeg_source_local(path: str) -> discord.FFmpegPCMAudio:
@@ -428,9 +491,23 @@ class CategoryFolderView(View):
 # Web UI Watcher
 ############################################
 
-@tasks.loop(seconds=1)
+@tasks.loop(seconds=0.25)
 async def web_ui_watcher():
     req_file = os.path.join(MEDIA_BASE, "play_request.txt")
+    restart_file = RESTART_REQUEST_FILE
+    if os.path.exists(restart_file):
+        restart_source = "Web UI"
+        try:
+            with open(restart_file, "r", encoding="utf-8") as f:
+                restart_source = f.read().strip() or restart_source
+        except Exception as e:
+            print("Restart Request Read Error:", e)
+        try:
+            os.remove(restart_file)
+        except Exception as e:
+            print("Restart Request Cleanup Error:", e)
+        await perform_bot_restart(restart_source)
+        return
     if os.path.exists(req_file):
         try:
             with open(req_file, "r", encoding="utf-8") as f:
@@ -478,6 +555,37 @@ async def web_ui_watcher():
 async def before_web_ui_watcher():
     await bot.wait_until_ready()
 
+@tasks.loop(seconds=30)
+async def empty_voice_restart_watcher():
+    for vc in list(bot.voice_clients):
+        guild = getattr(vc, "guild", None)
+        if guild is None:
+            continue
+
+        channel = getattr(vc, "channel", None)
+        if channel is None:
+            bot._empty_voice_since.pop(guild.id, None)
+            continue
+
+        human_members = get_human_members_in_channel(channel)
+        if human_members:
+            bot._empty_voice_since.pop(guild.id, None)
+            continue
+
+        empty_since = bot._empty_voice_since.get(guild.id)
+        if empty_since is None:
+            bot._empty_voice_since[guild.id] = time.monotonic()
+            continue
+
+        if time.monotonic() - empty_since >= EMPTY_VOICE_RESTART_TIMEOUT:
+            bot._empty_voice_since.pop(guild.id, None)
+            await perform_bot_restart(f"Voice-Timeout nach 30 Minuten ohne Nutzer in {channel.name}")
+            return
+
+@empty_voice_restart_watcher.before_loop
+async def before_empty_voice_restart_watcher():
+    await bot.wait_until_ready()
+
 ############################################
 # Bot-Klasse & Instanz
 ############################################
@@ -486,6 +594,7 @@ class SoundBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._voice_join_ts = {}
+        self._empty_voice_since = {}
         self._last_vc_channel: dict = {}
         self.http_session: Optional[aiohttp.ClientSession] = None
 
@@ -493,7 +602,9 @@ class SoundBot(commands.Bot):
         connector = aiohttp.TCPConnector(limit=20, force_close=True)
         self.http_session = aiohttp.ClientSession(connector=connector)
         await self.add_cog(ServerStatusMonitor(self, channel_id=1200120616230076496))
+        await self.tree.sync()
         web_ui_watcher.start()
+        empty_voice_restart_watcher.start()
 
     async def close(self):
         try:
@@ -516,11 +627,31 @@ bot = SoundBot(command_prefix="!", help_command=None, intents=intents)
 @bot.event
 async def on_ready():
     print(f"Angemeldet als {bot.user.name}")
+    await send_restart_notification()
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     if member.id == bot.user.id:
         print("[VOICE]", f"before={getattr(before.channel, 'name', None)}", f"after={getattr(after.channel, 'name', None)}")
+        if after.channel is not None:
+            if get_human_members_in_channel(after.channel):
+                bot._empty_voice_since.pop(member.guild.id, None)
+            else:
+                bot._empty_voice_since[member.guild.id] = time.monotonic()
+        else:
+            bot._empty_voice_since.pop(member.guild.id, None)
+        return
+
+    guild = member.guild
+    vc = guild.voice_client
+    if vc is None or vc.channel is None:
+        bot._empty_voice_since.pop(guild.id, None)
+        return
+
+    if get_human_members_in_channel(vc.channel):
+        bot._empty_voice_since.pop(guild.id, None)
+    else:
+        bot._empty_voice_since[guild.id] = time.monotonic()
 
 # Optional: CommandNotFound leise ignorieren (verhindert Logspam)
 @bot.event
@@ -705,6 +836,15 @@ async def restart_cmd(ctx: commands.Context):
             return
         await asyncio.sleep(30)
     await ctx.send(f"❌ Der Server `{SSH_HOST}` ist nicht innerhalb der erwarteten Zeit erreichbar geworden.")
+
+
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+@bot.tree.command(name="restart", description="Startet den Discord-Bot neu.")
+async def restart_slash(interaction: discord.Interaction):
+    source = f"/restart von {interaction.user.display_name}"
+    await interaction.response.send_message("Bot-Neustart wird ausgefuehrt.", ephemeral=True)
+    request_bot_restart(source)
 
 
 @bot.command(name="startpal")

@@ -56,6 +56,12 @@ async def on_ready():
         opus_lib = '/usr/lib/x86_64-linux-gnu/libopus.so.0' # debian
         discord.opus.load_opus(opus_lib)
 
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    raise error
+
 @bot.command(name='join', help='Tells the bot to join the voice channel')
 async def join(ctx):
     if not ctx.message.author.voice:

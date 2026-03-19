@@ -39,6 +39,10 @@ def get_existing_files():
         return set()
     return {f for f in os.listdir(MEDIA_FOLDER) if f.lower().endswith(('.mp3', '.wav'))}
 
+def request_bot_restart(source='Web UI'):
+    with open(os.path.join(MEDIA_FOLDER, 'restart_request.txt'), 'w', encoding='utf-8') as f:
+        f.write(source)
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -207,6 +211,16 @@ HTML_TEMPLATE = """
                 <form action="{{ url_for('create_category') }}" method="post" class="upload-form" style="margin-top: 1rem;">
                     <input type="text" name="new_category" class="cat-select" placeholder="Ordnername..." required style="flex-grow: 1;">
                     <button type="submit" class="btn btn-primary">Erstellen</button>
+                </form>
+            </div>
+            <div style="flex: 1; min-width: 300px; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 2rem;">
+                <h2>Bot steuern</h2>
+                <form action="{{ url_for('restart_bot') }}" method="post" style="margin-top: 1rem;" onsubmit="return confirm('Bot wirklich neu starten?');">
+                    <button type="submit" class="btn btn-danger">Bot neu starten</button>
+                </form>
+                <p style="margin-top: 0.75rem; color: #94a3b8; font-size: 0.9rem;">
+                    Der Bot beendet sich kurz selbst und wird durch Docker automatisch neu gestartet.
+                </p>
             </div>
             <div style="flex: 1; min-width: 300px; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 2rem;">
                 <h2>Sound aufnehmen 🎤</h2>
@@ -689,6 +703,12 @@ def play_on_server(filename):
     with open(req_file, 'a', encoding='utf-8') as f:
         f.write(filename + '\n')
     flash(f'{filename} wird im Discord abgespielt!')
+    return redirect(url_for('index'))
+
+@app.route('/restart_bot', methods=['POST'])
+def restart_bot():
+    request_bot_restart()
+    flash('Neustart fuer den Bot angefordert. Docker startet den Container in Kuerze neu.')
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
