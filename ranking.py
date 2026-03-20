@@ -1,25 +1,37 @@
-import os
 import json
-import collections
+import os
+
+
+RANKS_FILE = os.path.join("media", "ranks.json")
+LEGACY_RANKS_FILE = "ranks.json"
+
+
+def get_ranks_file_path():
+    os.makedirs(os.path.dirname(RANKS_FILE), exist_ok=True)
+    if os.path.exists(RANKS_FILE):
+        return RANKS_FILE
+    if os.path.exists(LEGACY_RANKS_FILE):
+        return LEGACY_RANKS_FILE
+    return RANKS_FILE
 
 
 def load_ranks():
-    if os.path.exists('ranks.json'):
-        with open('ranks.json', 'r') as f:
+    ranks_file = get_ranks_file_path()
+    if os.path.exists(ranks_file):
+        with open(ranks_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-            sound_ranks = data.get('sound_ranks', {})
-            user_ranks = data.get('user_ranks', {})  # Ändere von defaultdict(int) zu einem normalen Dictionary.
-            sound_emojis = data.get('sound_emojis', {})
+            sound_ranks = data.get("sound_ranks", {})
+            user_ranks = data.get("user_ranks", {})
+            sound_emojis = data.get("sound_emojis", {})
             return sound_ranks, user_ranks, sound_emojis
-    else:
-        return {}, {}, {}  # Return ein leeres Dictionary für user_ranks, anstelle von defaultdict(int).
+    return {}, {}, {}
+
 
 def save_ranks(sound_ranks, user_ranks, sound_emojis):
-    # Daten mit Sound Ranks, User Ranks (jetzt mit exp und level), und Sound Emojis speichern
     data = {
-        'sound_ranks': sound_ranks,
-        'user_ranks': user_ranks,  # Direktes Speichern des user_ranks Dictionary.
-        'sound_emojis': sound_emojis
+        "sound_ranks": sound_ranks,
+        "user_ranks": user_ranks,
+        "sound_emojis": sound_emojis,
     }
-    with open('ranks.json', 'w') as f:
+    with open(RANKS_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
