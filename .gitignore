@@ -20,7 +20,6 @@ Thumbs.db
 # Projektspezifische Medien und Datenbanken
 /media/
 /data/
-ranks.json
 
 # Docker
 .dockerignore
