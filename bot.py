@@ -26,14 +26,20 @@ from ranking import load_ranks, save_ranks
 
 # Media-Pfad & Fallback-Token
 MEDIA_BASE, token_from_checkos = perform_os_specific_action()
-TOKEN = os.getenv("discordbot")
-if not TOKEN:
-    p1 = os.getenv("discordbot_p1", "")
-    p2 = os.getenv("discordbot_p2", "")
+
+def load_token(env_name: str, fallback: Optional[str] = None) -> Optional[str]:
+    token = os.getenv(env_name)
+    if token:
+        return token
+    p1 = os.getenv(f"{env_name}_p1", "")
+    p2 = os.getenv(f"{env_name}_p2", "")
     if p1 and p2:
-        TOKEN = p1 + p2
-    else:
-        TOKEN = token_from_checkos
+        return p1 + p2
+    return fallback
+
+
+PRIMARY_TOKEN = load_token("discordbot", token_from_checkos)
+SECONDARY_TOKEN = load_token("discordbot2")
 
 MAX_BUTTONS_PER_MESSAGE = 20
 OPUS_LIB_PATH = "/opt/homebrew/lib/libopus.dylib"          # macOS
@@ -48,6 +54,11 @@ SSH_PASSWORD = os.environ.get("pav")  # Passwort via ENV setzen!
 RESTART_NOTIFY_CHANNEL_ID = 1174617198191444058
 RESTART_REQUEST_FILE = os.path.join(MEDIA_BASE, "restart_request.txt")
 RESTART_NOTICE_FILE = os.path.join(MEDIA_BASE, "restart_notice.txt")
+PRIMARY_BOT_KEY = "bot1"
+SECONDARY_BOT_KEY = "bot2"
+
+PRIMARY_BOT = None
+ALL_BOTS = []
 
 # Discord Intents
 intents = discord.Intents.default()
@@ -101,17 +112,32 @@ def request_bot_restart(source: str):
     with open(RESTART_REQUEST_FILE, "w", encoding="utf-8") as f:
         f.write(source.strip() or "Unbekannt")
 
-async def get_restart_notification_channel():
-    channel = bot.get_channel(RESTART_NOTIFY_CHANNEL_ID)
+def get_play_request_file(bot_key: str) -> str:
+    return os.path.join(MEDIA_BASE, f"play_request_{bot_key}.txt")
+
+
+def get_bot_voice_client(bot_client: commands.Bot, guild: discord.Guild) -> Optional[discord.VoiceClient]:
+    return discord.utils.get(bot_client.voice_clients, guild=guild)
+
+
+def get_bot_guild(bot_client: commands.Bot, guild_id: int) -> Optional[discord.Guild]:
+    return bot_client.get_guild(guild_id)
+
+
+async def get_restart_notification_channel(bot_client: Optional[commands.Bot] = None):
+    target_bot = bot_client or PRIMARY_BOT
+    if target_bot is None:
+        return None
+    channel = target_bot.get_channel(RESTART_NOTIFY_CHANNEL_ID)
     if channel is None:
         try:
-            channel = await bot.fetch_channel(RESTART_NOTIFY_CHANNEL_ID)
+            channel = await target_bot.fetch_channel(RESTART_NOTIFY_CHANNEL_ID)
         except Exception as e:
             print("Restart notification channel fetch error:", e)
             return None
     return channel
 
-async def send_restart_notification():
+async def send_restart_notification(bot_client: Optional[commands.Bot] = None):
     if not os.path.exists(RESTART_NOTICE_FILE):
         return
 
@@ -124,7 +150,7 @@ async def send_restart_notification():
     except Exception as e:
         print("Restart notice read error:", e)
 
-    channel = await get_restart_notification_channel()
+    channel = await get_restart_notification_channel(bot_client)
     if channel is None:
         return
 
@@ -148,7 +174,7 @@ async def perform_bot_restart(source: str):
         except Exception as e:
             print("Restart pending notification send error:", e)
     print(f"Restart request received from {source}. Shutting down bot for Docker restart.")
-    await bot.close()
+    await asyncio.gather(*(registered_bot.close() for registered_bot in ALL_BOTS if registered_bot is not None), return_exceptions=True)
 
 # FFmpeg-Quelle für LOKALE Dateien (vermeidet ResourceWarnings)
 def make_ffmpeg_source_local(path: str) -> discord.FFmpegPCMAudio:
@@ -284,9 +310,8 @@ class SoundboardButton(Button):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
-        vc = interaction.guild.voice_client
-        if vc is None:
-            vc = discord.utils.get(bot.voice_clients, guild=interaction.guild)
+        current_bot = interaction.client
+        vc = get_bot_voice_client(current_bot, interaction.guild)
 
         # Wenn bereits verbunden -> sofort abspielen
         if vc and getattr(vc, "channel", None):
@@ -324,8 +349,8 @@ class SoundboardButton(Button):
                 vc.play(source, after=_after)
 
                 # letzten Channel merken
-                bot._last_vc_channel = getattr(bot, "_last_vc_channel", {})
-                bot._last_vc_channel[interaction.guild.id] = vc.channel.id
+                current_bot._last_vc_channel = getattr(current_bot, "_last_vc_channel", {})
+                current_bot._last_vc_channel[interaction.guild.id] = vc.channel.id
 
                 # XP & Klicks
                 uid = str(interaction.user.id)
@@ -346,7 +371,7 @@ class SoundboardButton(Button):
 
         # nicht verbunden: Ziel ermitteln (letzter Channel oder User-Channel)
         target_channel = None
-        last_map = getattr(bot, "_last_vc_channel", {})
+        last_map = getattr(current_bot, "_last_vc_channel", {})
         chan_id = last_map.get(interaction.guild.id)
         if chan_id:
             target_channel = interaction.guild.get_channel(chan_id)
@@ -366,9 +391,9 @@ class SoundboardButton(Button):
                 vc = await target_channel.connect()
             else:
                 await vc.move_to(target_channel)
-            bot._voice_join_ts[interaction.guild.id] = time.monotonic()
-            bot._last_vc_channel = getattr(bot, "_last_vc_channel", {})
-            bot._last_vc_channel[interaction.guild.id] = target_channel.id
+            current_bot._voice_join_ts[interaction.guild.id] = time.monotonic()
+            current_bot._last_vc_channel = getattr(current_bot, "_last_vc_channel", {})
+            current_bot._last_vc_channel[interaction.guild.id] = target_channel.id
             # direkt nach Join Keep-Alive starten
             await ensure_keepalive(vc)
         except Exception as e:
@@ -491,123 +516,153 @@ class CategoryFolderView(View):
 # Web UI Watcher
 ############################################
 
-@tasks.loop(seconds=0.25)
-async def web_ui_watcher():
-    req_file = os.path.join(MEDIA_BASE, "play_request.txt")
-    restart_file = RESTART_REQUEST_FILE
-    if os.path.exists(restart_file):
-        restart_source = "Web UI"
-        try:
-            with open(restart_file, "r", encoding="utf-8") as f:
-                restart_source = f.read().strip() or restart_source
-        except Exception as e:
-            print("Restart Request Read Error:", e)
-        try:
-            os.remove(restart_file)
-        except Exception as e:
-            print("Restart Request Cleanup Error:", e)
-        await perform_bot_restart(restart_source)
-        return
-    if os.path.exists(req_file):
+def create_web_ui_watcher(bot_client: commands.Bot):
+    @tasks.loop(seconds=0.25)
+    async def watcher():
+        restart_file = RESTART_REQUEST_FILE
+        if getattr(bot_client, "is_primary", False) and os.path.exists(restart_file):
+            restart_source = "Web UI"
+            try:
+                with open(restart_file, "r", encoding="utf-8") as f:
+                    restart_source = f.read().strip() or restart_source
+            except Exception as e:
+                print("Restart Request Read Error:", e)
+            try:
+                os.remove(restart_file)
+            except Exception as e:
+                print("Restart Request Cleanup Error:", e)
+            await perform_bot_restart(restart_source)
+            return
+
+        req_file = get_play_request_file(bot_client.bot_key)
+        if not os.path.exists(req_file):
+            return
+
         try:
             with open(req_file, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             os.remove(req_file)
             for line in lines:
                 filename = line.strip()
-                if not filename: continue
-                # We play on the first active guild
+                if not filename:
+                    continue
                 played = False
-                for guild_id, chan_id in getattr(bot, "_last_vc_channel", {}).items():
-                    guild = bot.get_guild(guild_id)
-                    if not guild: continue
+                for guild_id, chan_id in getattr(bot_client, "_last_vc_channel", {}).items():
+                    guild = bot_client.get_guild(guild_id)
+                    if not guild:
+                        continue
                     target_channel = guild.get_channel(chan_id)
-                    if not target_channel: continue
-                    vc = guild.voice_client
+                    if not target_channel:
+                        continue
+                    vc = get_bot_voice_client(bot_client, guild)
                     if vc is None:
                         try:
                             vc = await target_channel.connect()
-                        except:
+                        except Exception:
                             continue
                     try:
                         if vc.is_playing():
                             vc.stop()
                         audio_path = os.path.join(MEDIA_BASE, filename)
-                        if not os.path.exists(audio_path): continue
+                        if not os.path.exists(audio_path):
+                            continue
                         source = make_ffmpeg_source_local(audio_path)
+
                         def _after(err: Optional[Exception], _vc=vc, _source=source):
                             try:
-                                if hasattr(_source, "cleanup"): _source.cleanup()
-                            except: pass
+                                if hasattr(_source, "cleanup"):
+                                    _source.cleanup()
+                            except Exception:
+                                pass
                             try:
                                 asyncio.get_running_loop().create_task(ensure_keepalive(_vc))
-                            except: pass
+                            except Exception:
+                                pass
+
                         vc.play(source, after=_after)
                         played = True
                     except Exception as e:
-                        print("Web Play Error:", e)
+                        print(f"Web Play Error ({bot_client.bot_key}):", e)
                     if played:
                         break
         except Exception as e:
-            print("Web UI Watcher Error:", e)
+            print(f"Web UI Watcher Error ({bot_client.bot_key}):", e)
 
-@web_ui_watcher.before_loop
-async def before_web_ui_watcher():
-    await bot.wait_until_ready()
+    @watcher.before_loop
+    async def before_watcher():
+        await bot_client.wait_until_ready()
 
-@tasks.loop(seconds=30)
-async def empty_voice_restart_watcher():
-    for vc in list(bot.voice_clients):
-        guild = getattr(vc, "guild", None)
-        if guild is None:
-            continue
+    return watcher
 
-        channel = getattr(vc, "channel", None)
-        if channel is None:
-            bot._empty_voice_since.pop(guild.id, None)
-            continue
 
-        human_members = get_human_members_in_channel(channel)
-        if human_members:
-            bot._empty_voice_since.pop(guild.id, None)
-            continue
+def create_empty_voice_restart_watcher(bot_client: commands.Bot):
+    @tasks.loop(seconds=30)
+    async def watcher():
+        for vc in list(bot_client.voice_clients):
+            guild = getattr(vc, "guild", None)
+            if guild is None:
+                continue
 
-        empty_since = bot._empty_voice_since.get(guild.id)
-        if empty_since is None:
-            bot._empty_voice_since[guild.id] = time.monotonic()
-            continue
+            channel = getattr(vc, "channel", None)
+            if channel is None:
+                bot_client._empty_voice_since.pop(guild.id, None)
+                continue
 
-        if time.monotonic() - empty_since >= EMPTY_VOICE_RESTART_TIMEOUT:
-            bot._empty_voice_since.pop(guild.id, None)
-            await perform_bot_restart(f"Voice-Timeout nach 30 Minuten ohne Nutzer in {channel.name}")
-            return
+            human_members = get_human_members_in_channel(channel)
+            if human_members:
+                bot_client._empty_voice_since.pop(guild.id, None)
+                continue
 
-@empty_voice_restart_watcher.before_loop
-async def before_empty_voice_restart_watcher():
-    await bot.wait_until_ready()
+            empty_since = bot_client._empty_voice_since.get(guild.id)
+            if empty_since is None:
+                bot_client._empty_voice_since[guild.id] = time.monotonic()
+                continue
+
+            if time.monotonic() - empty_since >= EMPTY_VOICE_RESTART_TIMEOUT:
+                bot_client._empty_voice_since.pop(guild.id, None)
+                await perform_bot_restart(f"Voice-Timeout nach 30 Minuten ohne Nutzer in {channel.name}")
+                return
+
+    @watcher.before_loop
+    async def before_watcher():
+        await bot_client.wait_until_ready()
+
+    return watcher
 
 ############################################
 # Bot-Klasse & Instanz
 ############################################
 
 class SoundBot(commands.Bot):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, bot_key: str, soundboard_command_name: str, is_primary: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
+        self.bot_key = bot_key
+        self.soundboard_command_name = soundboard_command_name
+        self.is_primary = is_primary
         self._voice_join_ts = {}
         self._empty_voice_since = {}
         self._last_vc_channel: dict = {}
         self.http_session: Optional[aiohttp.ClientSession] = None
+        self._web_ui_watcher = create_web_ui_watcher(self)
+        self._empty_voice_restart_watcher = create_empty_voice_restart_watcher(self)
 
     async def setup_hook(self):
         connector = aiohttp.TCPConnector(limit=20, force_close=True)
         self.http_session = aiohttp.ClientSession(connector=connector)
-        await self.add_cog(ServerStatusMonitor(self, channel_id=1200120616230076496))
+        if self.is_primary:
+            await self.add_cog(ServerStatusMonitor(self, channel_id=1200120616230076496))
         await self.tree.sync()
-        web_ui_watcher.start()
-        empty_voice_restart_watcher.start()
+        if not self._web_ui_watcher.is_running():
+            self._web_ui_watcher.start()
+        if not self._empty_voice_restart_watcher.is_running():
+            self._empty_voice_restart_watcher.start()
 
     async def close(self):
         try:
+            if self._web_ui_watcher.is_running():
+                self._web_ui_watcher.cancel()
+            if self._empty_voice_restart_watcher.is_running():
+                self._empty_voice_restart_watcher.cancel()
             for vc in list(self.voice_clients):
                 try:
                     await vc.disconnect(force=True)
@@ -618,19 +673,159 @@ class SoundBot(commands.Bot):
         finally:
             await super().close()
 
-bot = SoundBot(command_prefix="!", help_command=None, intents=intents)
+bot = SoundBot(command_prefix="!", help_command=None, intents=intents, bot_key=PRIMARY_BOT_KEY, soundboard_command_name="soundboard", is_primary=True)
+bot2 = SoundBot(command_prefix="!", help_command=None, intents=intents, bot_key=SECONDARY_BOT_KEY, soundboard_command_name="soundboard2")
+
+PRIMARY_BOT = bot
+ALL_BOTS.extend([bot, bot2])
 
 ############################################
 # Events
 ############################################
 
-@bot.event
-async def on_ready():
-    print(f"Angemeldet als {bot.user.name}")
-    await send_restart_notification()
+def register_common_events(bot_client: SoundBot):
+    @bot_client.event
+    async def on_ready():
+        print(f"Angemeldet als {bot_client.user.name} ({bot_client.bot_key})")
+        if bot_client.is_primary:
+            await send_restart_notification(bot_client)
 
-@bot.event
-async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    @bot_client.event
+    async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        if member.id == bot_client.user.id:
+            print("[VOICE]", bot_client.bot_key, f"before={getattr(before.channel, 'name', None)}", f"after={getattr(after.channel, 'name', None)}")
+            if after.channel is not None:
+                if get_human_members_in_channel(after.channel):
+                    bot_client._empty_voice_since.pop(member.guild.id, None)
+                else:
+                    bot_client._empty_voice_since[member.guild.id] = time.monotonic()
+            else:
+                bot_client._empty_voice_since.pop(member.guild.id, None)
+            return
+
+        guild = member.guild
+        vc = get_bot_voice_client(bot_client, guild)
+        if vc is None or vc.channel is None:
+            bot_client._empty_voice_since.pop(guild.id, None)
+            return
+
+        if get_human_members_in_channel(vc.channel):
+            bot_client._empty_voice_since.pop(guild.id, None)
+        else:
+            bot_client._empty_voice_since[guild.id] = time.monotonic()
+
+    @bot_client.event
+    async def on_command_error(ctx, error):
+        if isinstance(error, commands.CommandNotFound):
+            return
+        raise error
+
+
+async def open_soundboard_text(ctx: commands.Context, bot_client: SoundBot):
+    if ctx.author.voice is None:
+        await ctx.send("Du musst in einem Sprachkanal sein, um das Soundboard zu verwenden.")
+        return
+
+    target_guild = get_bot_guild(bot_client, ctx.guild.id)
+    if target_guild is None:
+        await ctx.send("Der ausgewaehlte Bot ist auf diesem Server nicht verfuegbar.")
+        return
+
+    vc = get_bot_voice_client(bot_client, target_guild)
+    try:
+        source_voice_channel = ctx.author.voice.channel
+        target_channel = target_guild.get_channel(source_voice_channel.id)
+        if target_channel is None:
+            await ctx.send("Der Ziel-Sprachkanal konnte fuer diesen Bot nicht gefunden werden.")
+            return
+        if vc is None:
+            vc = await target_channel.connect()
+        elif vc.channel != target_channel:
+            await vc.move_to(target_channel)
+
+        bot_client._voice_join_ts[target_guild.id] = time.monotonic()
+        bot_client._last_vc_channel[target_guild.id] = target_channel.id
+        await ensure_keepalive(vc)
+    except Exception as e:
+        await ctx.send(f"Voice-Connect fehlgeschlagen: {e}")
+        return
+
+    categories_map = get_sounds_categorized()
+    view = CategoryFolderView(categories_map)
+    await ctx.send("Soundboard geoeffnet:", view=view)
+
+
+async def open_soundboard_slash(interaction: discord.Interaction, bot_client: SoundBot):
+    if interaction.user.voice is None:
+        await interaction.response.send_message("Du musst in einem Sprachkanal sein, um das Soundboard zu verwenden.", ephemeral=True)
+        return
+
+    target_guild = get_bot_guild(bot_client, interaction.guild.id)
+    if target_guild is None:
+        await interaction.response.send_message("Der ausgewaehlte Bot ist auf diesem Server nicht verfuegbar.", ephemeral=True)
+        return
+
+    vc = get_bot_voice_client(bot_client, target_guild)
+    try:
+        source_voice_channel = interaction.user.voice.channel
+        target_channel = target_guild.get_channel(source_voice_channel.id)
+        if target_channel is None:
+            await interaction.response.send_message("Der Ziel-Sprachkanal konnte fuer diesen Bot nicht gefunden werden.", ephemeral=True)
+            return
+        if vc is None:
+            vc = await target_channel.connect()
+        elif vc.channel != target_channel:
+            await vc.move_to(target_channel)
+
+        bot_client._voice_join_ts[target_guild.id] = time.monotonic()
+        bot_client._last_vc_channel[target_guild.id] = target_channel.id
+        await ensure_keepalive(vc)
+    except Exception as e:
+        await interaction.response.send_message(f"Voice-Connect fehlgeschlagen: {e}", ephemeral=True)
+        return
+
+    categories_map = get_sounds_categorized()
+    view = CategoryFolderView(categories_map)
+    await interaction.response.send_message("Soundboard geoeffnet:", view=view, ephemeral=True)
+
+
+def register_soundboard_commands(bot_client: SoundBot):
+    @bot_client.command(name=bot_client.soundboard_command_name)
+    async def soundboard_text_command(ctx: commands.Context):
+        await open_soundboard_text(ctx, bot_client)
+
+    @app_commands.guild_only()
+    @bot_client.tree.command(name=bot_client.soundboard_command_name, description="Holt den Bot in deinen Sprachkanal und oeffnet das Soundboard.")
+    async def soundboard_slash_command(interaction: discord.Interaction):
+        await open_soundboard_slash(interaction, bot_client)
+
+
+register_common_events(bot)
+register_common_events(bot2)
+
+
+@bot.command(name="soundboard")
+async def soundboard_primary_text(ctx: commands.Context):
+    await open_soundboard_text(ctx, bot)
+
+
+@bot.command(name="soundboard2")
+async def soundboard_secondary_text(ctx: commands.Context):
+    await open_soundboard_text(ctx, bot2)
+
+
+@app_commands.guild_only()
+@bot.tree.command(name="soundboard", description="Holt Bot 1 in deinen Sprachkanal und oeffnet das Soundboard.")
+async def soundboard_primary_slash(interaction: discord.Interaction):
+    await open_soundboard_slash(interaction, bot)
+
+
+@app_commands.guild_only()
+@bot.tree.command(name="soundboard2", description="Holt Bot 2 in deinen Sprachkanal und oeffnet das Soundboard.")
+async def soundboard_secondary_slash(interaction: discord.Interaction):
+    await open_soundboard_slash(interaction, bot2)
+
+async def legacy_on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     if member.id == bot.user.id:
         print("[VOICE]", f"before={getattr(before.channel, 'name', None)}", f"after={getattr(after.channel, 'name', None)}")
         if after.channel is not None:
@@ -654,8 +849,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         bot._empty_voice_since[guild.id] = time.monotonic()
 
 # Optional: CommandNotFound leise ignorieren (verhindert Logspam)
-@bot.event
-async def on_command_error(ctx, error):
+async def legacy_on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
     raise error
@@ -664,8 +858,7 @@ async def on_command_error(ctx, error):
 # Commands
 ############################################
 
-@bot.command(name="soundboard")
-async def soundboard_cmd(ctx: commands.Context):
+async def legacy_soundboard_cmd(ctx: commands.Context):
     if ctx.author.voice is None:
         await ctx.send("Du musst in einem Sprachkanal sein, um das Soundboard zu verwenden.")
         return
@@ -711,7 +904,7 @@ async def upload(ctx: commands.Context):
         await ctx.send("Keine Anhänge gefunden.")
         return
 
-    session = getattr(bot, 'http_session', None)
+    session = getattr(ctx.bot, 'http_session', None)
     if session is None:
         await ctx.send("Interner Fehler: HTTP-Session fehlt.")
         return
@@ -757,13 +950,14 @@ async def list_files(ctx: commands.Context):
 @bot.command(name="help")
 async def help_command(ctx: commands.Context):
     embed = discord.Embed(title="Hilfe", description="Liste aller verfügbaren Befehle", color=0x00FF00)
-    embed.add_field(name="Befehl", value="`!help`\n`!upload`\n`!delete`\n`!list`\n`!soundboard`\n`!search`\n`!setemoji`\n`!rankings`\n`!restart`\n`!startpal`", inline=True)
+    embed.add_field(name="Befehl", value="`!help`\n`!upload`\n`!delete`\n`!list`\n`!soundboard`\n`!soundboard2`\n`!search`\n`!setemoji`\n`!rankings`\n`!restart`\n`!startpal`", inline=True)
     embed.add_field(name="Beschreibung", value=(
         "Zeigt diese Hilfe an\n"
         "Lädt eine MP3/WAV hoch\n"
         "Löscht eine Datei\n"
         "Listet Dateien\n"
-        "Öffnet das Soundboard\n"
+        "Öffnet Bot 1 im Voice\n"
+        "Öffnet Bot 2 im Voice\n"
         "Suche nach Sounds im Chat\n"
         "Setzt Emoji für Sound\n"
         "Zeigt User-Rankings\n"
@@ -812,7 +1006,7 @@ async def send_rankings(ctx: commands.Context):
     lines = []
     for user_id, stats in sorted_user_ranks:
         try:
-            user = await bot.fetch_user(int(user_id))
+            user = await ctx.bot.fetch_user(int(user_id))
             exp_to_next = LEVEL_UP_EXP - stats['exp']
             lines.append(f"{user.display_name}: {stats['exp']} EXP (Noch {exp_to_next} bis Level {stats['level'] + 1}), Level: {stats['level']}")
         except Exception as e:
@@ -865,7 +1059,7 @@ async def startpal(ctx: commands.Context):
 # Extra Utilities
 @bot.command(name="leave")
 async def leave(ctx: commands.Context):
-    vc = ctx.voice_client
+    vc = get_bot_voice_client(ctx.bot, ctx.guild)
     if vc and getattr(vc, "channel", None):
         await vc.disconnect(force=True)
         await ctx.send("✅ Voice getrennt.")
@@ -876,7 +1070,7 @@ async def leave(ctx: commands.Context):
 async def summon(ctx: commands.Context):
     if not ctx.author.voice:
         return await ctx.send("Geh bitte zuerst in einen Voice-Channel.")
-    vc = ctx.voice_client
+    vc = get_bot_voice_client(ctx.bot, ctx.guild)
     if vc is None:
         vc = await ctx.author.voice.channel.connect(reconnect=False)
     else:
@@ -889,10 +1083,21 @@ async def summon(ctx: commands.Context):
 # Start
 ############################################
 
+if SECONDARY_TOKEN is None:
+    print("Hinweis: Kein Token fuer den zweiten Sound-Bot gefunden. Setze discordbot2 oder discordbot2_p1/p2.")
+
+
+async def main():
+    start_tasks = [bot.start(PRIMARY_TOKEN)]
+    if SECONDARY_TOKEN:
+        start_tasks.append(bot2.start(SECONDARY_TOKEN))
+    await asyncio.gather(*start_tasks)
+
+
 if __name__ == "__main__":
     warnings.simplefilter("default", ResourceWarning)
     tracemalloc.start()
     try:
-        bot.run(TOKEN)
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass

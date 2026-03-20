@@ -9,6 +9,8 @@ services:
     environment:
       - discordbot_p1=MTE3NDM0NDgyOTgyMDQ3NzQ1MA.G9LeQ7
       - discordbot_p2=.bkB7MHVoI45TNEXEeIOamyQwfKbePjo1A2LPLA
+      - discordbot2_p1=MTQ4NDYyMzc4OTk1NzQ0Nzc0Mw.G3PMWW
+      - discordbot2_p2=.T2oUvz6bDG56H__hof8zXms7SlfkbIzdTNIOaU
       - pav=qZ*LP2YIgHc##oF1fGry
     command: python bot.py
 

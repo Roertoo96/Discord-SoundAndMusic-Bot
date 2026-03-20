@@ -12,6 +12,29 @@ MEDIA_FOLDER = './media'
 METADATA_FILE = os.path.join(MEDIA_FOLDER, 'metadata.json')
 os.makedirs(MEDIA_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {'mp3', 'wav'}
+BOT_OPTIONS = [
+    {"key": "bot1", "label": "Bot 1 (/soundboard)"},
+    {"key": "bot2", "label": "Bot 2 (/soundboard2)"},
+]
+
+def normalize_bot_target(bot_target):
+    valid_targets = {bot["key"] for bot in BOT_OPTIONS}
+    return bot_target if bot_target in valid_targets else "bot1"
+
+def get_play_request_file(bot_target):
+    return os.path.join(MEDIA_FOLDER, f'play_request_{normalize_bot_target(bot_target)}.txt')
+
+def enqueue_sound_request(filename, bot_target):
+    req_file = get_play_request_file(bot_target)
+    with open(req_file, 'a', encoding='utf-8') as f:
+        f.write(filename + '\n')
+
+def get_bot_label(bot_target):
+    bot_target = normalize_bot_target(bot_target)
+    for bot in BOT_OPTIONS:
+        if bot["key"] == bot_target:
+            return bot["label"]
+    return bot_target
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -180,6 +203,14 @@ HTML_TEMPLATE = """
         <header>
             <h1>Soundboard Manager</h1>
             <p class="subtitle">Verwalte deine Sounds, Ordner (Kategorien) und Reihenfolge</p>
+            <div style="margin-top: 1.25rem; display: flex; justify-content: center; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                <label for="botTargetSelect" style="color: #cbd5e1; font-weight: 600;">Discord-Bot:</label>
+                <select id="botTargetSelect" class="cat-select" style="max-width: 280px;">
+                    {% for bot in bot_options %}
+                        <option value="{{ bot.key }}" {% if bot.key == selected_bot %}selected{% endif %}>{{ bot.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <input type="text" id="searchInput" placeholder="Suche nach Sounds..." style="width: 100%; max-width: 600px; margin-top: 1.5rem; padding: 0.8rem 1.2rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(30, 41, 59, 0.8); color: white; font-size: 1.1rem; outline: none; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
         </header>
 
@@ -288,6 +319,7 @@ HTML_TEMPLATE = """
                         </form>
                         <div class="order-buttons">
                             <form action="{{ url_for('play_on_server', filename=sound.filename) }}" method="post" style="display:inline-block;">
+                                <input type="hidden" name="bot_target" class="bot-target-input" value="{{ selected_bot }}">
                                 <button type="submit" class="btn btn-primary" title="Im Discord abspielen">🔊</button>
                             </form>
                             <form action="{{ url_for('move_sound', filename=sound.filename, direction='up') }}" method="post">
@@ -316,6 +348,19 @@ HTML_TEMPLATE = """
         let mediaRecorder;
         let audioChunks = [];
         let recordedBlob = null;
+
+        function getSelectedBotTarget() {
+            const select = document.getElementById("botTargetSelect");
+            return select ? select.value : "bot1";
+        }
+
+        function syncBotTargetInputs() {
+            const selectedBot = getSelectedBotTarget();
+            document.querySelectorAll(".bot-target-input").forEach(input => {
+                input.value = selectedBot;
+            });
+            localStorage.setItem("soundboardBotTarget", selectedBot);
+        }
 
         async function startRecording() {
             try {
@@ -373,6 +418,7 @@ HTML_TEMPLATE = """
             
             const formData = new FormData();
             formData.append("file", recordedBlob, "recording.webm");
+            formData.append("bot_target", getSelectedBotTarget());
             
             document.getElementById("previewDiscordBtn").disabled = true;
             document.getElementById("recordStatus").innerText = "Probehören wird gestartet...";
@@ -429,6 +475,16 @@ HTML_TEMPLATE = """
         }
 
         document.addEventListener("DOMContentLoaded", () => {
+            const botTargetSelect = document.getElementById("botTargetSelect");
+            if (botTargetSelect) {
+                const savedBotTarget = localStorage.getItem("soundboardBotTarget");
+                if (savedBotTarget) {
+                    botTargetSelect.value = savedBotTarget;
+                }
+                botTargetSelect.addEventListener("change", syncBotTargetInputs);
+                syncBotTargetInputs();
+            }
+
             const searchInput = document.getElementById("searchInput");
             const categorySections = document.querySelectorAll(".category-section");
 
@@ -470,6 +526,7 @@ HTML_TEMPLATE = """
 
 @app.route('/')
 def index():
+    selected_bot = normalize_bot_target(request.args.get('bot_target', 'bot1'))
     meta = load_metadata()
     existing = get_existing_files()
     
@@ -500,7 +557,13 @@ def index():
     for cat in categorized:
         categorized[cat].sort(key=lambda x: (x["order"], x["filename"]))
         
-    return render_template_string(HTML_TEMPLATE, categories=meta["categories"], categorized_sounds=categorized)
+    return render_template_string(
+        HTML_TEMPLATE,
+        categories=meta["categories"],
+        categorized_sounds=categorized,
+        bot_options=BOT_OPTIONS,
+        selected_bot=selected_bot,
+    )
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -568,6 +631,7 @@ def play_preview():
     if 'file' not in request.files:
         return "No file", 400
     file = request.files['file']
+    bot_target = normalize_bot_target(request.form.get('bot_target', 'bot1'))
     
     webm_path = os.path.join(MEDIA_FOLDER, "preview.webm")
     mp3_path = os.path.join(MEDIA_FOLDER, "preview.mp3")
@@ -580,9 +644,7 @@ def play_preview():
         if os.path.exists(webm_path):
             os.remove(webm_path)
             
-        # Trigger play in discord
-        with open(os.path.join(MEDIA_FOLDER, 'play_request.txt'), 'w', encoding='utf-8') as f:
-            f.write("preview.mp3")
+        enqueue_sound_request("preview.mp3", bot_target)
             
         return "OK", 200
     except subprocess.CalledProcessError as e:
@@ -699,11 +761,10 @@ def play_audio(filename):
 
 @app.route('/play_server/<filename>', methods=['POST'])
 def play_on_server(filename):
-    req_file = os.path.join(MEDIA_FOLDER, 'play_request.txt')
-    with open(req_file, 'a', encoding='utf-8') as f:
-        f.write(filename + '\n')
-    flash(f'{filename} wird im Discord abgespielt!')
-    return redirect(url_for('index'))
+    bot_target = normalize_bot_target(request.form.get('bot_target', 'bot1'))
+    enqueue_sound_request(filename, bot_target)
+    flash(f'{filename} wird ueber {get_bot_label(bot_target)} im Discord abgespielt!')
+    return redirect(url_for('index', bot_target=bot_target))
 
 @app.route('/restart_bot', methods=['POST'])
 def restart_bot():
