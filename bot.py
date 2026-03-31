@@ -189,7 +189,7 @@ def make_silence_source() -> discord.FFmpegPCMAudio:
     # anullsrc erzeugt Stille (48kHz, Stereo)
     return discord.FFmpegPCMAudio(
         source="anullsrc=r=48000:cl=stereo",
-        before_options="-nostdin -f lavfi -i",
+        before_options="-nostdin -f lavfi",
         options="-vn -ac 2 -ar 48000"
     )
 
