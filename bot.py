@@ -620,8 +620,11 @@ def create_empty_voice_restart_watcher(bot_client: commands.Bot):
 
             if time.monotonic() - empty_since >= EMPTY_VOICE_RESTART_TIMEOUT:
                 bot_client._empty_voice_since.pop(guild.id, None)
-                await perform_bot_restart(f"Voice-Timeout nach 30 Minuten ohne Nutzer in {channel.name}")
-                return
+                try:
+                    await vc.disconnect()
+                except Exception as e:
+                    print(f"Fehler beim Time-out Disconnect: {e}")
+                continue
 
     @watcher.before_loop
     async def before_watcher():
